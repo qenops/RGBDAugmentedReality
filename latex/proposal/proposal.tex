@@ -1,0 +1,80 @@
+\documentclass[twoside]{article}
+\usepackage[margin=2cm]{geometry}
+\usepackage[T1]{fontenc}
+% \usepackage{times,array}
+
+\usepackage[pdftex]{graphicx}
+\usepackage{wrapfig}
+%\usepackage{fancyvrb}
+%\usepackage{multirow}
+%\usepackage{amssymb}
+\usepackage{subfigure}
+%\usepackage{algorithm}
+%\usepackage{algorithmic}
+%\usepackage{tabulary}
+%\usepackage{booktabs}
+%\usepackage{float}
+\usepackage{hyperref}
+\usepackage{tikz}
+%\usepackage{pgfplots}
+%\usepackage{mathtools}
+\usepackage[utf8x]{inputenc}
+\usepackage{etoolbox}
+%\usepackage{etex}
+%\usepackage{mcode}
+%\usepackage{breqn}
+\usepackage{authblk}
+\usepackage[sort&compress]{natbib}
+\setcitestyle{square}
+
+\usepackage{ifthen}
+% Toggle for draft mode
+\newtoggle{draft}
+%\toggletrue{draft}
+\togglefalse{draft}
+\newtoggle{true}
+\toggletrue{true}
+
+% Use “\cite{NEEDED}” to get “citation needed” in document
+\let\oldcite=\cite
+\renewcommand\cite[1]{\ifthenelse{\equal{#1}{NEEDED}}{\iftoggle{draft}{\textcolor{red}{\ensuremath{^{[citation~needed]}}}}{}}{\oldcite{#1}}}
+
+\newcommand{\ts}{\textsuperscript}
+
+\usetikzlibrary{external}
+\tikzexternalize[optimize=false,prefix=pics/] 
+\tikzset{external/force remake=false}
+
+% \usepackage[justification=centering]{caption}
+
+\definecolor{Red}{rgb}{1., 0, 0}
+\definecolor{Blue}{rgb}{0, 0, 1.}
+\definecolor{Green}{rgb}{0., .6, 0.}
+\definecolor{Yellow}{rgb}{.9, .7, 0.}
+\newcommand{\rafay}[1]{\textcolor{Blue}{\textbf{Rafay: #1}}}
+\newcommand{\david}[1]{\textcolor{Green}{\textbf{David: #1}}}
+\newcommand{\rough}{\iftoggle{draft}{\textcolor{red}{Rough }}{}}
+\newcommand{\placeholder}[1]{\iftoggle{draft}{\textcolor{Blue}{Reference (from #1 paper): }}{}}
+\newcommand{\degree}{° }
+
+\begin{document}
+\title{Proposal for Course Projects}
+
+\author{David~Dunn}
+\author{Rafay~Khalid}
+
+\affil{Computer~Science~Department\\UNC~Chapel~Hill}
+\maketitle
+
+%\begin{abstract}
+%
+%\end{abstract}
+%\clearpage
+\section{Introduction}
+
+\section{Division of Labor}
+
+\bibliographystyle{ieeetr} 
+\bibliography{refs}
+\end{document}
+
