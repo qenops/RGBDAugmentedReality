@@ -3,3 +3,4 @@
 __author__ = ('David Dunn')
 __version__ = '0.1'
 
+dataDir = '~/data/radialCircularWalk/'
