@@ -87,3 +87,47 @@ ENV/
 # Rope project settings
 .ropeproject
 
+# Visual Studio Property Sheets
+.props
+.sdf
+.sln
+.suo
+.db
+.opendb
+.filters
+.user
+.vcxproj
+.tlog
+.log
+.obj
+.pdb
+
+/code/C++/Property Sheets/desktop.ini
+*.props
+*.ini
+*.xml
+*.lib
+*.ipch
+*.tlog
+*.obj
+*.dll
+*.exe
+*.lastbuildstate
+*.res
+*.pdb
+*.ico
+*.cd
+*.aps
+*.opensdf
+*.sdf
+*.sln
+*.suo
+*.vcxproj
+*.rc
+*.user
+*.idb
+*.unsuccessfulbuild
+*.exp
+*.opendb
+*.db
+/code/C++/RGBDAugmentedReality/~$tes on Kinect Fusion.docx
