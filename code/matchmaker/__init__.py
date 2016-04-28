@@ -38,8 +38,8 @@ def distanceRotation(a1, a2):
     r2 = np.matrix(a2.reshape((3,3))).T
     # I need to do math here and just return a scalar
     rod = cv2.Rodrigues(r1.I*r2)[0]
-    #return abs(rod[0])+abs(rod[1])
-    return rod
+    return abs(rod[0])+abs(rod[1])
+    #return rod
 
 def distances(rotation, translation):
     # just use euclidean distance for translation
