@@ -4,6 +4,7 @@ __author__ = ('David Dunn')
 __version__ = '0.1'
 
 import tensorflow as tf
+import cv2
 
 IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 480
