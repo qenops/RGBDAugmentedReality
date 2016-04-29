@@ -62,7 +62,7 @@ def parseMatrixFile(path=dataDir, fileName='matrix.txt'):
 # value = 6x1 tensor
 def getPairs(path=dataDir,poseFile='poses.txt',preMultFile=None,postMultFile=None):
     print "Creating pairs from %s%s..."%(path,poseFile)
-    postMult = parseMatrixFile(fileName=postMultFile) if postMultFile is not None else np.eye(4)
+    postMult = parseMatrixFile(fileName=postMultFdataDirile) if postMultFile is not None else np.eye(4)
     preMult = parseMatrixFile(fileName=preMultFile) if preMultFile is not None else np.eye(4)
     rotation, translation, matrices = parseTrackingFile(path=dataDir,fileName='poses.txt',preMult=preMult,postMult=postMult)
     distRot, distTrans = distances(rotation, translation)
@@ -78,12 +78,12 @@ def getPairs(path=dataDir,poseFile='poses.txt',preMultFile=None,postMultFile=Non
     print "...done matching pairs!"
     return size, dict(zip(map(tuple, pairs),labels))
     
-def loadDataset(dataDir, pairLabelsFile='pairLabels.txt', preMultFile='hiBall2Cam.txt'):
-    if os.path.isfile(os.path.join(dataDir, pairLabelsFile)):
-        print "Loading pairs from %s..."%os.path.join(dataDir, pairLabelsFile)
-        size, pairLabels = cPickle.load(open(os.path.join(dataDir, pairLabelsFile), 'r'))
+def loadDataset(path=dataDir, pairLabelsFile='pairLabels.txt', preMultFile='hiBall2Cam.txt'):
+    if os.path.isfile(os.path.join(path, pairLabelsFile)):
+        print "Loading pairs from %s..."%os.path.join(path, pairLabelsFile)
+        size, pairLabels = cPickle.load(open(os.path.join(path, pairLabelsFile), 'r'))
     else:
-        size, pairLabels = matchmaker.getPairs(path=dataDir, preMultFile=preMultFile)
+        size, pairLabels = matchmaker.getPairs(path, preMultFile=preMultFile)
         cPickle.dump([size,pairLabels], open(os.path.join(dataDir, pairLabelsFile), 'w')) 
     # need to combine color channels with depth channel
     print "Loading images into memory..."
