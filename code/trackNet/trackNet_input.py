@@ -3,36 +3,26 @@
 __author__ = ('David Dunn')
 __version__ = '0.1'
 
-import tensorflow as tf
 import cv2
+import tensorflow as tf
+import sys
+sys.path.append(r'..')
+import matchmaker
 
 IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 480
 
-class depthImage(object):
-    width = IMAGE_WIDTH
-    height = IMAGE_HEIGHT
-    depth = 4               # 4 channels for a depth image
-    label_bytes = 48        # 24 for translation 24 for rotation
-    @property
-    def nbytes(self):
-        return (self.width * self.height * self.depth) + self.label_bytes
-
-class trackNetRecord(object):
-    origFrame = depthImage()
-    newFrame = depthImage()
-    @property
-    def nbytes(self):
-        return self.origFrame.nbytes + self.newFrame.nbytes
+# we need to load the list of tuples - and precompute the labels
+# key = pair tuple
+# value = 6x1 tensor
 
 def read_trackNet(filename_queue):
-    
-    
-    reader = tf.FixedLengthRecordReader(record_bytes=record_bytes)
-    result.key, value = reader.read(filename_queue)
+    pass
     
 def inputs():
+    # load datasets into memory
+    pairLabels, imageSet = matchmaker.loadDataset('/playpen/tracknet/radialCircularWalk/')
     # create a queue?
     
     # read from files in queue
-    read_input = read_trackNet(filename_queue)
+    #read_input = read_trackNet(filename_queue)
