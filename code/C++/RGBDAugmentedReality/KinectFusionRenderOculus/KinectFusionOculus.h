@@ -12,6 +12,7 @@ class KinectFusionRenderOculus:OpenGLApp
 {
 
 	static const int cBytesPerPixel = 4; // for depth float and int-per-pixel raycast images
+	static const int			cMinTimestampDifferenceForFrameReSync = 17;
 public:
 	KinectFusionRenderOculus();
 	~KinectFusionRenderOculus();
@@ -23,8 +24,11 @@ private:
 	void display();
 	void keyFunc(unsigned char key, int x, int y);
 	bool loadShaders();
+	bool AcquireColor();
 	void friend displayGL();
 	void friend keyGL(unsigned char key, int x, int y);
+
+	HRESULT CameraTrackingOnly();
 
 	//Render to Texture
 	bool GenerateTextureToRender();
@@ -43,8 +47,22 @@ private:
     //Copy Depth Image
     HRESULT CopyExtendedDepth(NUI_IMAGE_FRAME &imageFrame);
 
+
+	/// <summary>
+	/// Copy the color data out of a Kinect image frame
+	/// </summary>
+	/// <returns>S_OK on success, otherwise failure code</returns>
+	HRESULT                     CopyColor(NUI_IMAGE_FRAME &imageFrame);
+
+	/// <summary>
+	/// Adjust color to the same space as depth
+	/// </summary>
+	/// <returns>S_OK on success, otherwise failure code</returns>
+	HRESULT                     MapColorToDepth();
      /// Handle new depth data
     void ProcessDepth();
+
+	void KinectColorFloatImageToOpenCV(NUI_FUSION_IMAGE_FRAME * colorImgFrame);
 
 	void KinectDepthFloatImageToOpenCV(NUI_FUSION_IMAGE_FRAME * depthImgFrame);
 
@@ -59,22 +77,35 @@ private:
 	//Current Kinect
 	INuiSensor* m_pNuiSensor;
 	NUI_IMAGE_RESOLUTION        m_depthImageResolution; //set to 640 x 480
+	NUI_IMAGE_RESOLUTION		m_colorImageResolution;
 	int                         m_cDepthWidth; //width of depth image
 	int                         m_cDepthHeight;	//height of depth image
 	int                         m_cDepthImagePixels; // number of pixels in depth image
 
+	int                         m_cColorWidth;
+	int                         m_cColorHeight;
+	int                         m_cColorImagePixels;
+
 	HANDLE                      m_pDepthStreamHandle;
 	HANDLE                      m_hNextDepthFrameEvent;
 
-	LARGE_INTEGER               m_cLastDepthFrameTimeStamp;  //Last depthmap timestamp
+	HANDLE                      m_pColorStreamHandle;
+	HANDLE                      m_hNextColorFrameEvent;
+
+	LARGE_INTEGER				m_cLastDepthFrameTimeStamp;
+	LARGE_INTEGER               m_cLastColorFrameTimeStamp;
+
+	LARGE_INTEGER				m_currentColorFrameTime;
+	LARGE_INTEGER				m_currentDepthFrameTime;
 
 	cv::Mat						m_floatDepthMapOpenCV;
+	cv::Mat						m_floatColorOpenCV;
 	//Depth in RGBX format
 	BYTE* m_pDepthRGBX;
 	//KinFusion Variables
 	//KinFusion Mesh
 	 //The Kinect Fusion Reconstruction Volume
-    INuiFusionReconstruction*   m_pVolume;
+	INuiFusionColorReconstruction*   m_pVolume;
 
     // The Kinect Fusion Volume Parameters
     NUI_FUSION_RECONSTRUCTION_PARAMETERS m_reconstructionParams;
@@ -100,6 +131,8 @@ private:
     int                         m_cLostFrameCounter;
     bool                        m_bTrackingFailed;
 
+
+
     /// Parameter to turn automatic reset of the reconstruction when camera tracking is lost on or off.
     /// Set to true in the constructor to enable auto reset on cResetOnNumberOfLostFrames lost frames,
     /// or set false to never automatically reset.
@@ -112,6 +145,19 @@ private:
     /// automatic reset on timeouts.
     bool                        m_bAutoResetReconstructionOnTimeout;
 
+	bool						m_bTranslateResetPoseByMinDepthThreshold;
+	/// <summary>
+	/// For mapping depth to color
+	/// </summary>
+	NUI_FUSION_IMAGE_FRAME*     m_pColorImage;
+	NUI_FUSION_IMAGE_FRAME*     m_pResampledColorImageDepthAligned;
+	NUI_COLOR_IMAGE_POINT*      m_pColorCoordinates;
+	float                       m_colorToDepthDivisor;
+	float                       m_oneOverDepthDivisor;
+	INuiCoordinateMapper*       m_pMapper;
+	bool                        m_bCaptureColor;
+	unsigned int                m_cColorIntegrationInterval;
+	bool						m_integrateColor;
     /// Processing parameters
     int                         m_deviceIndex;
     NUI_FUSION_RECONSTRUCTION_PROCESSOR_TYPE m_processorType;
