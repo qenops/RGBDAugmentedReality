@@ -22,7 +22,6 @@ bool OpenGLApp::initGL(float l, float r,float t,float b,float n ,float f )
 		cout << "Error code is: " << err << std::endl;
 		return false;
 	}
-
 	glDisable(GL_CULL_FACE);
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_LINE_SMOOTH);

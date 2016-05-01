@@ -892,6 +892,11 @@ HRESULT CKinectFusionColorBasics::MapColorToDepth()
     srcColorTex->UnlockRect(0);
     destColorTex->UnlockRect(0);
 
+
+
+
+
+
     return hr;
 }
 
@@ -1237,7 +1242,6 @@ void CKinectFusionColorBasics::ProcessDepth()
 
     // Update frame counter
     m_cFrameCounter++;
-
     // Display fps count approximately every cTimeDisplayInterval seconds
     double elapsed = m_timer.AbsoluteTime() - m_fStartTime;
     if ((int)elapsed >= cTimeDisplayInterval)

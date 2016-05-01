@@ -35,8 +35,10 @@ KinectFusionRenderOculus::KinectFusionRenderOculus():
 	m_bInitializeError(false),
 	m_bCaptureColor(true),
 	m_bMirrorDepthFrame(false),
-	m_cColorIntegrationInterval(2)
+	m_cColorIntegrationInterval(2),
+	m_bNearMode(true)
 {
+	m_osystem = new OculusSystem();
 	//Initialize Depth Image Size
 	DWORD width = 0, height = 0;
     NuiImageResolutionToSize(m_depthImageResolution, width, height);
@@ -78,8 +80,8 @@ KinectFusionRenderOculus::KinectFusionRenderOculus():
     SetIdentityMatrix(m_worldToCameraTransform);
     SetIdentityMatrix(m_defaultWorldToVolumeTransform);
 
-	m_cLastDepthFrameTimeStamp.QuadPart = 0;
-	m_cLastColorFrameTimeStamp.QuadPart = 0;
+	m_cLastDepthFrameTimeStamp = 0;
+	m_cLastColorFrameTimeStamp = 0;
 
 	m_hNextDepthFrameEvent = CreateEvent(
 		nullptr,
@@ -94,10 +96,43 @@ KinectFusionRenderOculus::KinectFusionRenderOculus():
 	
 }
 
+bool KinectFusionRenderOculus::initGL(float l, float r, float t, float b, float n, float f)
+{
+	/*int err = glewInit();
+	if ((err != 0))
+	{
+		cout << "GLEW could not be initialized!" << endl;
+		cout << "Error code is: " << err << std::endl;
+		return false;
+	}
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_DEPTH_TEST);
+	glEnable(GL_LINE_SMOOTH);
+	glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST);
+	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+	glClearColor(0, 0, 0, 1); // Black*/
+//	m_projection = getPerspectiveMatrix(l, r, t, b, n, f);
+	//m_view = identity3D();
+	return true;
+}
+
+bool KinectFusionRenderOculus::initGLUT(int argc, char* argv[], string name, int windowWidth, int windowHeight)
+{
+	glutInit(&argc, argv);
+	glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGBA);
+	glutInitWindowSize(windowWidth, windowHeight);
+	glutCreateWindow(name.c_str());
+	glutDisplayFunc(displayGL);
+	glutKeyboardFunc(keyGL);
+	return true;
+
+}
 KinectFusionRenderOculus::~KinectFusionRenderOculus()
 {
+	SAFE_DELETE(m_osystem);
 	// Clean up Kinect Fusion
     SafeRelease(m_pVolume);
+	SafeRelease(m_pMapper);
 
     SAFE_FUSION_RELEASE_IMAGE_FRAME(m_pShadedSurface);
     SAFE_FUSION_RELEASE_IMAGE_FRAME(m_pPointCloud);
@@ -138,12 +173,27 @@ bool KinectFusionRenderOculus::Run(int argc, char * argv[])
 		return false;
 	}
 
-
-	if (!initGL(-0.1, 0.1, -0.1, 0.1, 0.1, 1000))
+	m_osystem->initialize();
+	if (!m_osystem->loadBuffers())
+		printf("Sorry loading of the required buffers failed \n");
+	else
+		printf("All Buffers loaded \n");
+	m_osystem->GetEyePositionsFromHMD(m_leftEyeTrans, m_rightEyeTrans);
+	m_osystem->GetIdealRenderSize(m_leftTextureSize, m_rightTextureSize);
+	m_osystem->GetEyeFOVFromHMD(m_leftEyeFOV,m_rightEyeFOV);
+	if (!CreateRenderObjectsForOculus())
+	{
+		cout << "couldn't generate render object for oculus" << endl;
+	}
+	else
+	{
+		cout << "Render objects for oculus created" << endl;
+	}
+	/*if (!initGL(-0.1, 0.1, -0.1, 0.1, 0.1, 1000))
 	{
 		std::cout << "Init GL Failed" << std::endl;
 		return false;
-	}
+	}*/
 	
 	if(!initKinect())
 	{
@@ -208,7 +258,7 @@ bool KinectFusionRenderOculus::initKinect()
 		if (nullptr != m_pNuiSensor)
 		{
 			// Initialize the Kinect and specify that we'll be using depth
-			hr = m_pNuiSensor->NuiInitialize(NUI_INITIALIZE_FLAG_USES_DEPTH);
+			hr = m_pNuiSensor->NuiInitialize(NUI_INITIALIZE_FLAG_USES_DEPTH| NUI_INITIALIZE_FLAG_USES_COLOR);
 			if (SUCCEEDED(hr))
 			{
 				// Open a depth image stream to receive depth frames
@@ -238,6 +288,11 @@ bool KinectFusionRenderOculus::initKinect()
 			}
 		}
 
+		if (m_bNearMode)
+		{
+			// Set near mode based on our internal state
+			HRESULT nearHr = m_pNuiSensor->NuiImageStreamSetImageFrameFlags(m_pDepthStreamHandle, NUI_IMAGE_STREAM_FLAG_ENABLE_NEAR_MODE);
+		}
 		if (nullptr == m_pNuiSensor || FAILED(hr))
 		{
 			std::cout<<"No ready Kinect found!"<<endl;
@@ -254,8 +309,14 @@ void KinectFusionRenderOculus::display()
 	glClearDepth(1.0f);
 	glClear(GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_DEPTH_TEST);
+	//m_osystem->Render();
+	if (!RenderForOculus())
+	{
+	cout << "Couldn't render frame to Oculus" << endl;
+	}
 	Update();
 	GenerateTextureToRender();
+	
 	glutPostRedisplay();
 	glutSwapBuffers();
 }
@@ -274,7 +335,7 @@ bool KinectFusionRenderOculus::AcquireColor()
 	////////////////////////////////////////////////////////
 	// Get a color frame from Kinect
 	NUI_IMAGE_FRAME imageFrame;
-	LARGE_INTEGER currentColorFrameTime = m_cLastColorFrameTimeStamp;
+	m_currentColorFrameTime = m_cLastColorFrameTimeStamp;
 
 	HRESULT hr = m_pNuiSensor->NuiImageStreamGetNextFrame(m_pColorStreamHandle, 0, &imageFrame);
 	if (FAILED(hr))
@@ -285,7 +346,7 @@ bool KinectFusionRenderOculus::AcquireColor()
 	{
 		hr = CopyColor(imageFrame);
 
-		currentColorFrameTime = imageFrame.liTimeStamp;
+		m_currentColorFrameTime = imageFrame.liTimeStamp.QuadPart;
 
 		// Release the Kinect camera frame
 		m_pNuiSensor->NuiImageStreamReleaseFrame(m_pColorStreamHandle, &imageFrame);
@@ -306,7 +367,6 @@ void KinectFusionRenderOculus::ProcessDepth()
 	}
 
 	HRESULT hr = S_OK;
-	NUI_IMAGE_FRAME imageFrame;
 	m_integrateColor = m_bCaptureColor && m_cFrameCounter % m_cColorIntegrationInterval == 0;
 	
 	if (!AquireDepth())
@@ -326,16 +386,16 @@ void KinectFusionRenderOculus::ProcessDepth()
 	}
 	else 
 	{
-		KinectDepthFloatImageToOpenCV(m_pColorImage);
+		KinectColorFloatImageToOpenCV(m_pColorImage,"Color Image");
 	}
 	// Check color and depth frame timestamps to ensure they were captured at the same time
 	// If not, we attempt to re-synchronize by getting a new frame from the stream that is behind.
-	int timestampDiff = static_cast<int>(abs(m_currentColorFrameTime.QuadPart - m_currentDepthFrameTime.QuadPart));
+	int timestampDiff = static_cast<int>(abs(m_currentColorFrameTime - m_currentDepthFrameTime));
 	
 	if (m_integrateColor && timestampDiff >= cMinTimestampDifferenceForFrameReSync)
 	{
 		// Get another frame to try and re-sync
-		if (m_currentColorFrameTime.QuadPart - m_currentDepthFrameTime.QuadPart >= cMinTimestampDifferenceForFrameReSync)
+		if (m_currentColorFrameTime- m_currentDepthFrameTime >= cMinTimestampDifferenceForFrameReSync)
 		{
 			// Perform camera tracking only from this current depth frame
 			if (m_cFrameCounter > 0)
@@ -344,14 +404,20 @@ void KinectFusionRenderOculus::ProcessDepth()
 			}
 
 			// Get another depth frame to try and re-sync as color ahead of depth
-			AquireDepth();
+			if (!AquireDepth())
+			{
+				cout<<"Kinect Depth stream NuiImageStreamReleaseFrame call failed."<<endl;
+			}
 		}
-		else if (m_currentDepthFrameTime.QuadPart - m_currentColorFrameTime.QuadPart >= cMinTimestampDifferenceForFrameReSync && WaitForSingleObject(m_hNextColorFrameEvent, 0) != WAIT_TIMEOUT)
+		else if (m_currentDepthFrameTime - m_currentColorFrameTime >= cMinTimestampDifferenceForFrameReSync && WaitForSingleObject(m_hNextColorFrameEvent, 0) != WAIT_TIMEOUT)
 		{
 			// Get another color frame to try and re-sync as depth ahead of color
-			AcquireColor();
+			if (!AcquireColor()) 
+			{
+				m_integrateColor = false;
+			}
 
-			timestampDiff = static_cast<int>(abs(m_currentColorFrameTime.QuadPart - m_currentDepthFrameTime.QuadPart));
+			timestampDiff = static_cast<int>(abs(m_currentColorFrameTime - m_currentDepthFrameTime));
 
 			// If the difference is still too large, we do not want to integrate color
 			if (timestampDiff > cMinTimestampDifferenceForFrameReSync)
@@ -432,7 +498,7 @@ void KinectFusionRenderOculus::ProcessDepth()
 			//Add code to perform alignment if tracking fails
 			m_cLostFrameCounter++;
 			m_bTrackingFailed = true;
-			std::cout<<"Kinect Fusion camera tracking failed! Align the camera to the last tracked position. "<<endl;
+			std::cout<<"ProcFrame: Kinect Fusion camera tracking failed! Align the camera to the last tracked position. "<<endl;
 		}
 		else
 		{
@@ -506,22 +572,22 @@ void KinectFusionRenderOculus::ProcessDepth()
 	// Update frame counter
 	m_cFrameCounter++;
 
-	//// Display fps count approximately every cTimeDisplayInterval seconds
-	//double elapsed = m_timer.AbsoluteTime() - m_fStartTime;
-	//if ((int)elapsed >= cTimeDisplayInterval)
+	// Display fps count approximately every cTimeDisplayInterval seconds
+	double elapsed = m_timer.AbsoluteTime() - m_fStartTime;
+	if ((int)elapsed >= cTimeDisplayInterval)
 	{
-	//	double fps = (double)m_cFrameCounter / elapsed;
+		double fps = (double)m_cFrameCounter / elapsed;
 
-	//	// Update status display
-	//	if (!m_bTrackingFailed)
-	//	{
-	//		WCHAR str[MAX_PATH];
-	//		swprintf_s(str, ARRAYSIZE(str), L"Fps: %5.2f", fps);
-	//		SetStatusMessage(str);
-	//	}
+		// Update status display
+		if (!m_bTrackingFailed)
+		{
+			WCHAR str[MAX_PATH];
+			swprintf_s(str, ARRAYSIZE(str), L"Fps: %5.2f", fps);
+			//SetStatusMessage(str);
+		}
 
-	//	m_cFrameCounter = 0;
-	//	m_fStartTime = m_timer.AbsoluteTime();
+		m_cFrameCounter = 0;
+		m_fStartTime = m_timer.AbsoluteTime();
 	}
 }
 
@@ -552,7 +618,7 @@ HRESULT KinectFusionRenderOculus::CameraTrackingOnly()
 		if (tracking == E_NUI_FUSION_TRACKING_ERROR)
 		{
 			
-				cout<<"Kinect Fusion camera tracking failed! Align the camera to the last tracked position."<<endl;
+				cout<<"CAMtrack:Kinect Fusion camera tracking failed! Align the camera to the last tracked position."<<endl;
 		}
 		else
 		{
@@ -578,14 +644,14 @@ bool KinectFusionRenderOculus::GenerateTextureToRender()
 	//Camera Matrix to render from
 	Matrix4 worldToCamera = m_worldToCameraTransform;
 
-	HRESULT hr = m_pVolume->CalculatePointCloud(m_pPointCloud, ((m_bCaptureColor == true) ? m_pShadedSurface : nullptr), &worldToCamera);
-
+	//HRESULT hr = m_pVolume->CalculatePointCloud(m_pPointCloud, ((m_bCaptureColor == true) ? m_pShadedSurface : nullptr), &worldToCamera);
+	HRESULT hr = m_pVolume->CalculatePointCloud(m_pPointCloud, m_pShadedSurface , &worldToCamera);
 	if (FAILED(hr))
 	{
 		std::cout << "Kinect Fusion CalculatePointCloud call failed." << endl;
 		return false;
 	}
-
+	//hr = NuiFusionShadePointCloud(m_pPointCloud, &worldToCamera, nullptr, m_pShadedSurface, nullptr);
 	////////////////////////////////////////////////////////
 	// ShadePointCloud
 
@@ -616,14 +682,54 @@ bool KinectFusionRenderOculus::GenerateTextureToRender()
 	if (ShadedLockedRect.Pitch != 0)
 	{
 		BYTE * pBuffer = (BYTE *)ShadedLockedRect.pBits;
-
 		// Draw the data with Direct2D
 		//m_pDrawDepth->Draw(pBuffer, m_cDepthWidth * m_cDepthHeight * cBytesPerPixel);
-		m_RenderTarget = cv::Mat(m_pShadedSurface->height,m_pShadedSurface->width,CV_8UC4,pBuffer);
+		m_RenderTarget = cv::Mat(m_pShadedSurface->height, m_pShadedSurface->width,CV_8UC4,pBuffer);
 	}
 	imshow("Render Target", m_RenderTarget);
 	// We're done with the texture so unlock it
 	pShadedImageTexture->UnlockRect(0);
+	return true;
+}
+bool KinectFusionRenderOculus::GenerateTextureToRender(NUI_FUSION_IMAGE_FRAME* pShadedSurface, NUI_FUSION_IMAGE_FRAME* pCloud, Matrix4 poseWorldtoCamera,Texture& tex)
+{
+	cv::Mat renderImg;
+	if (m_pVolume == nullptr)
+	{
+		return false;
+	}
+	//Camera Matrix to render from
+	Matrix4 worldToCamera = poseWorldtoCamera;
+	//HRESULT hr = m_pVolume->CalculatePointCloud(m_pPointCloud, ((m_bCaptureColor == true) ? m_pShadedSurface : nullptr), &worldToCamera);
+	HRESULT hr = m_pVolume->CalculatePointCloud(pCloud, pShadedSurface, &worldToCamera);
+	if (FAILED(hr))
+	{
+		std::cout << "Kinect Fusion CalculatePointCloud call failed." << endl;
+		return false;
+	}
+
+	// Draw the shaded raycast volume image
+	INuiFrameTexture * pShadedImageTexture = pShadedSurface->pFrameTexture;
+	NUI_LOCKED_RECT ShadedLockedRect;
+
+	// Lock the frame data so the Kinect knows not to modify it while we're reading it
+	hr = pShadedImageTexture->LockRect(0, &ShadedLockedRect, nullptr, 0);
+	if (FAILED(hr))
+	{
+		return false;
+	}
+
+	// Make sure we've received valid data
+	if (ShadedLockedRect.Pitch != 0)
+	{
+		BYTE * pBuffer = (BYTE *)ShadedLockedRect.pBits;
+		// Draw the data with Direct2D
+		//m_pDrawDepth->Draw(pBuffer, m_cDepthWidth * m_cDepthHeight * cBytesPerPixel);
+		renderImg = cv::Mat(pShadedSurface->height, pShadedSurface->width, CV_8UC4, pBuffer);
+	}
+	// We're done with the texture so unlock it
+	pShadedImageTexture->UnlockRect(0);
+	tex.UpdateTexture(renderImg);
 	return true;
 }
 
@@ -644,16 +750,17 @@ bool KinectFusionRenderOculus::AquireDepth()
 
 	hr = CopyExtendedDepth(imageFrame);
 
-	LARGE_INTEGER currentDepthFrameTime = imageFrame.liTimeStamp;
+	m_currentDepthFrameTime = imageFrame.liTimeStamp.QuadPart;
 
 	// Release the Kinect camera frame
 	m_pNuiSensor->NuiImageStreamReleaseFrame(m_pDepthStreamHandle, &imageFrame);
 
 	if (FAILED(hr))
 	{
+		cout << "Kinect Depth stream NuiImageStreamReleaseFrame call failed." << endl;
 		return false;
 	}
-	m_cLastDepthFrameTimeStamp = currentDepthFrameTime;
+	//m_cLastDepthFrameTimeStamp = currentDepthFrameTime;
 	return true;
 	// To enable playback of a .xed file through Kinect Studio and reset of the reconstruction
 	// if the .xed loops, we test for when the frame timestamp has skipped a large number. 
@@ -810,6 +917,14 @@ HRESULT KinectFusionRenderOculus::InitializeKinectFusion()
 
 	// Create images to raycast the Reconstruction Volume
 	hr = NuiFusionCreateImageFrame(NUI_FUSION_IMAGE_TYPE_COLOR, m_cDepthWidth, m_cDepthHeight, nullptr, &m_pShadedSurface);
+	if (FAILED(hr))
+	{
+		cout<<"Failed to initialize Kinect Fusion image."<<endl;
+		return hr;
+	}
+	
+	// Frames generated from the color input aligned to depth - same size as depth
+	hr = NuiFusionCreateImageFrame(NUI_FUSION_IMAGE_TYPE_COLOR, m_cDepthWidth, m_cDepthHeight, nullptr, &m_pResampledColorImageDepthAligned);
 	if (FAILED(hr))
 	{
 		cout<<"Failed to initialize Kinect Fusion image."<<endl;
@@ -1026,7 +1141,7 @@ HRESULT KinectFusionRenderOculus::CopyColor(NUI_IMAGE_FRAME &imageFrame)
 }
 
 
-void KinectFusionRenderOculus::KinectColorFloatImageToOpenCV(NUI_FUSION_IMAGE_FRAME* colorImgFrame)
+void KinectFusionRenderOculus::KinectColorFloatImageToOpenCV(NUI_FUSION_IMAGE_FRAME* colorImgFrame,string winName)
 {
 	//Extract pointer data from image
 	INuiFrameTexture *pColorImageTexture = colorImgFrame->pFrameTexture;
@@ -1035,12 +1150,14 @@ void KinectFusionRenderOculus::KinectColorFloatImageToOpenCV(NUI_FUSION_IMAGE_FR
 	if (colorLockedRect.Pitch != 0)
 	{
 		BYTE* pBuffer = (BYTE *)colorLockedRect.pBits;
-		m_floatColorOpenCV = cv::Mat(m_cDepthHeight, m_cDepthWidth, CV_8UC4, pBuffer);
+		m_floatColorOpenCV = cv::Mat(colorImgFrame->height, colorImgFrame->width, CV_8UC4, pBuffer);
 	}
 	pColorImageTexture->UnlockRect(0);
-	imshow("Color Image", m_floatColorOpenCV);
+	imshow(winName, m_floatColorOpenCV);
 
 }
+
+
 void KinectFusionRenderOculus::KinectDepthFloatImageToOpenCV(NUI_FUSION_IMAGE_FRAME* depthImgFrame)
 {
 	//Extract pointer data from image
@@ -1058,11 +1175,13 @@ void KinectFusionRenderOculus::KinectDepthFloatImageToOpenCV(NUI_FUSION_IMAGE_FR
 }
 HRESULT KinectFusionRenderOculus::MapColorToDepth()
 {
+	
 	HRESULT hr;
 
 	if (nullptr == m_pColorImage || nullptr == m_pResampledColorImageDepthAligned
 		|| nullptr == m_pDepthImagePixelBuffer || nullptr == m_pColorCoordinates)
 	{
+		cout << "Mapping color to depth failing" << endl;
 		return E_FAIL;
 	}
 
@@ -1157,10 +1276,10 @@ HRESULT KinectFusionRenderOculus::MapColorToDepth()
 			}
 		}
 	});
-
 	srcColorTex->UnlockRect(0);
 	destColorTex->UnlockRect(0);
-
+	// Code for displaying aligned color image
+	KinectColorFloatImageToOpenCV(m_pResampledColorImageDepthAligned, "Color Image Aligned");
 	return hr;
 }
 
@@ -1176,6 +1295,96 @@ void KinectFusionRenderOculus::SetIdentityMatrix(Matrix4 &mat)
 	mat.M21 = 0; mat.M22 = 1; mat.M23 = 0; mat.M24 = 0;
 	mat.M31 = 0; mat.M32 = 0; mat.M33 = 1; mat.M34 = 0;
 	mat.M41 = 0; mat.M42 = 0; mat.M43 = 0; mat.M44 = 1;
+}
+
+bool KinectFusionRenderOculus::RenderForOculus()
+{
+	if (!GenerateTextureToRender(m_pShadedSurfaceLeft,m_pPointCloudOculusLeft, m_worldToCameraTransform, *leftEyeTexture))
+	{
+		cout << "couldn't generate Eye texture" << endl;
+		return false;
+	}
+	if (!GenerateTextureToRender(m_pShadedSurfaceRight, m_pPointCloudOculusRight, m_worldToCameraTransform, *rightEyeTexture))
+	{
+		cout << "couldn't generate Eye texture" << endl;
+		return false;
+	}
+	m_osystem->Render(*leftEyeTexture,*rightEyeTexture);
+	return true;
+}
+
+bool KinectFusionRenderOculus::CreateRenderObjectsForOculus()
+{
+
+	// Frames generated from the depth input
+	m_camParamsLeft = ComputeCamParams(m_leftEyeFOV, m_leftTextureSize);
+	m_camParamsRight = ComputeCamParams(m_rightEyeFOV, m_rightTextureSize);
+	//std::cout << "Left FOV: " << m_leftEyeFOV.LeftTan << "  " << m_leftEyeFOV.UpTan << endl;
+	//std::cout << "Right FOV: " << m_rightEyeFOV.LeftTan << "  " << m_rightEyeFOV.UpTan << endl;
+	//std::cout << "Left Size: " << m_leftTextureSize.w << "  " << m_leftTextureSize.w << endl;
+	//std::cout << "Right Size: " << m_leftTextureSize.h << "  " << m_leftTextureSize.h << endl;
+	HRESULT hr = NuiFusionCreateImageFrame(NUI_FUSION_IMAGE_TYPE_COLOR, m_leftTextureSize.w, m_leftTextureSize.h, nullptr, &m_pShadedSurfaceLeft);
+	if (FAILED(hr))
+	{
+		cout << "Failed to initialize left eye textures." << endl;
+		return false;
+	}
+	else
+	{
+		m_pShadedSurfaceLeft->pCameraParameters = &m_camParamsLeft;
+		//NUI_FUSION_CAMERA_PARAMETERS* params = m_pShadedSurfaceLeft->pCameraParameters;
+		//cout << "Default focal" << params->focalLengthX << " " << params->focalLengthY << " " << params->principalPointX << " " << params->principalPointY << endl;
+	}
+	hr = NuiFusionCreateImageFrame(NUI_FUSION_IMAGE_TYPE_COLOR, m_rightTextureSize.w, m_rightTextureSize.h, nullptr, &m_pShadedSurfaceRight);
+	if (FAILED(hr))
+	{
+		cout << "Failed to initialize right eye textures." << endl;
+		return false;
+	}
+	else
+	{
+		m_pShadedSurfaceRight->pCameraParameters = &m_camParamsRight;
+	}
+	hr = NuiFusionCreateImageFrame(NUI_FUSION_IMAGE_TYPE_POINT_CLOUD, m_leftTextureSize.w, m_leftTextureSize.h, nullptr, &m_pPointCloudOculusLeft);
+	if (FAILED(hr))
+	{
+		cout << "Failed to initialize left eye pc." << endl;
+		return false;
+	}
+	else
+	{
+		m_pPointCloudOculusLeft->pCameraParameters = &m_camParamsLeft;
+	}
+	hr = NuiFusionCreateImageFrame(NUI_FUSION_IMAGE_TYPE_POINT_CLOUD, m_rightTextureSize.w, m_rightTextureSize.h, nullptr, &m_pPointCloudOculusRight);
+	if (FAILED(hr))
+	{
+		cout << "Failed to initialize right eye pc." << endl;
+		return false;
+	}
+	else
+	{
+		m_pPointCloudOculusRight->pCameraParameters = &m_camParamsRight;
+	}
+	cv::Mat zeroImg = cv::Mat(m_leftTextureSize.h, m_leftTextureSize.w,CV_8UC4);
+	leftEyeTexture = new Texture(zeroImg, GL_LINEAR, GL_CLAMP_TO_EDGE, GL_RGBA);
+	zeroImg = cv::Mat(m_rightTextureSize.h, m_rightTextureSize.w, CV_8UC4);
+	rightEyeTexture = new Texture(zeroImg, GL_LINEAR, GL_CLAMP_TO_EDGE, GL_RGBA);
+	return true;
+}
+
+float KinectFusionRenderOculus::ComputeFocalLengthFromAngleTan(float tanAngle,float width)
+{
+	return width/(2 * tanAngle);
+}
+
+NUI_FUSION_CAMERA_PARAMETERS KinectFusionRenderOculus::ComputeCamParams(ovrFovPort fov, OVR::Sizei texSize)
+{
+	NUI_FUSION_CAMERA_PARAMETERS params;
+	params.focalLengthX = ComputeFocalLengthFromAngleTan(fov.LeftTan, texSize.w)/texSize.w;
+	params.focalLengthY = ComputeFocalLengthFromAngleTan(fov.UpTan, texSize.h)/texSize.h;
+	params.principalPointX = 0.5;
+	params.principalPointY = 0.5;
+	return params;
 }
 
 

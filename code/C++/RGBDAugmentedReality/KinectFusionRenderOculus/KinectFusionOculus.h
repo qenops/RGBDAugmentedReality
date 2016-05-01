@@ -1,18 +1,23 @@
 #pragma once
 #include "stdafx.h"
-#include "GLHelper.h"
-#include "OpenGLApp.h"
+#include "OculusSystem.h"
+#include "GL/CAPI_GLE.h"
+#include "OVR_CAPI_GL.h"
+#include"algebra3.h"
+#include "glfw3.h"
+#include <GL/glut.h>
 #include <NuiApi.h>
 #include <NuiKinectFusionApi.h>
 #include "Timer.h"
 #include <opencv2\opencv.hpp>
 using namespace std;
 using namespace cv;
-class KinectFusionRenderOculus:OpenGLApp
+class KinectFusionRenderOculus
 {
 
-	static const int cBytesPerPixel = 4; // for depth float and int-per-pixel raycast images
+	static const int			cBytesPerPixel = 4; // for depth float and int-per-pixel raycast images
 	static const int			cMinTimestampDifferenceForFrameReSync = 17;
+	static const int            cTimeDisplayInterval = 10;
 public:
 	KinectFusionRenderOculus();
 	~KinectFusionRenderOculus();
@@ -27,7 +32,8 @@ private:
 	bool AcquireColor();
 	void friend displayGL();
 	void friend keyGL(unsigned char key, int x, int y);
-
+	bool initGL(float l, float r, float t, float b, float n, float f);
+	bool initGLUT(int argc, char* argv[], string name, int windowWidth, int windowHeight);
 	HRESULT CameraTrackingOnly();
 
 	//Render to Texture
@@ -62,18 +68,39 @@ private:
      /// Handle new depth data
     void ProcessDepth();
 
-	void KinectColorFloatImageToOpenCV(NUI_FUSION_IMAGE_FRAME * colorImgFrame);
+	void KinectColorFloatImageToOpenCV(NUI_FUSION_IMAGE_FRAME* colorImgFrame, string winName);
 
 	void KinectDepthFloatImageToOpenCV(NUI_FUSION_IMAGE_FRAME * depthImgFrame);
 
+	bool GenerateTextureToRender(NUI_FUSION_IMAGE_FRAME* pShadedSurface, NUI_FUSION_IMAGE_FRAME* pCloud, Matrix4 poseWorldtoCamera, Texture& tex);
     //Reset Reconstruction and clear camera Pose
     HRESULT ResetReconstruction();
 
 	//Set matrix to identity
 	void SetIdentityMatrix(Matrix4 & mat);
+	
+	//Oculus related functions
+	bool RenderForOculus();
+	bool CreateRenderObjectsForOculus();
+	float ComputeFocalLengthFromAngleTan(float tanAngle,float width);
+	NUI_FUSION_CAMERA_PARAMETERS ComputeCamParams(ovrFovPort fov, OVR::Sizei texSize);
+	//Oculus system
+	OculusSystem* m_osystem;
+	OVR::Vector3f m_rightEyeTrans;
+	OVR::Vector3f m_leftEyeTrans;
+	OVR::Sizei m_leftTextureSize;
+	OVR::Sizei m_rightTextureSize;
+	ovrFovPort m_leftEyeFOV;
+	ovrFovPort m_rightEyeFOV;
+	Texture* leftEyeTexture;
+	Texture* rightEyeTexture;
+	NUI_FUSION_CAMERA_PARAMETERS m_camParamsLeft;
+	NUI_FUSION_CAMERA_PARAMETERS m_camParamsRight;
 
-
-
+	NUI_FUSION_IMAGE_FRAME*     m_pShadedSurfaceLeft;
+	NUI_FUSION_IMAGE_FRAME*     m_pShadedSurfaceRight;
+	NUI_FUSION_IMAGE_FRAME*     m_pPointCloudOculusLeft;
+	NUI_FUSION_IMAGE_FRAME*     m_pPointCloudOculusRight;
 	//Current Kinect
 	INuiSensor* m_pNuiSensor;
 	NUI_IMAGE_RESOLUTION        m_depthImageResolution; //set to 640 x 480
@@ -92,11 +119,11 @@ private:
 	HANDLE                      m_pColorStreamHandle;
 	HANDLE                      m_hNextColorFrameEvent;
 
-	LARGE_INTEGER				m_cLastDepthFrameTimeStamp;
-	LARGE_INTEGER               m_cLastColorFrameTimeStamp;
+	LONGLONG					m_cLastDepthFrameTimeStamp;
+	LONGLONG					m_cLastColorFrameTimeStamp;
 
-	LARGE_INTEGER				m_currentColorFrameTime;
-	LARGE_INTEGER				m_currentDepthFrameTime;
+	LONGLONG					m_currentColorFrameTime;
+	LONGLONG					m_currentDepthFrameTime;
 
 	cv::Mat						m_floatDepthMapOpenCV;
 	cv::Mat						m_floatColorOpenCV;
@@ -169,6 +196,8 @@ private:
     int                         m_cFrameCounter;
     double                      m_fStartTime;
     Timing::Timer               m_timer;
+
+	bool						m_bNearMode;
 
 
 };
