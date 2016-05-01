@@ -1,4 +1,5 @@
-path2Dir='F:/arkhalid/Google Drive/ToMapWork/Courses/4th Semester/Virtual Worlds/Project/Sequences/Radial Circular Walk';
+%path2Dir='F:/arkhalid/Google Drive/ToMapWork/Courses/4th Semester/Virtual Worlds/Project/Sequences/Radial Circular Walk';
+path2Dir = '/playpen/tracknet/LivingRoom04';
 listInc = [];
 imgposes = dlmread('PosesColumnMajor.txt');
 for i = 2:size(imgposes,1)
@@ -16,3 +17,5 @@ for i = 2:size(imgposes,1)
 end
 imgposes =imgposes(listInc,:);
 dlmwrite('PosesColumnMajorCorrected.txt',imgposes);
+% how to write length(imgposes) as first line of file??
+dlmwrite('poses.txt',imgposes);

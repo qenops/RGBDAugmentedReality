@@ -131,3 +131,7 @@ ENV/
 *.opendb
 *.db
 /code/C++/RGBDAugmentedReality/~$tes on Kinect Fusion.docx
+
+# logs for tensorflow
+logs/
+*.edu
