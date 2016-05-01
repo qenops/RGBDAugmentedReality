@@ -7,7 +7,7 @@ import numpy as np
 from numpy import matlib
 import cv2
 from scipy.spatial.distance import pdist, squareform
-import math, os, cPickle
+import math, os
 
 dataDir = os.path.expanduser('/playpen/tracknet/radialCircularWalk/')
 maxTrans = 1500 # units in mm
@@ -61,7 +61,7 @@ def parseMatrixFile(path=dataDir, fileName='matrix.txt'):
 # key = pair tuple
 # value = 6x1 tensor
 def getPairs(path=dataDir,poseFile='poses.txt',preMultFile=None,postMultFile=None):
-    print "Creating pairs from %s%s..."%(path,poseFile)
+    print "Matchmaker:  creating pairs from %s%s..."%(path,poseFile)
     postMult = parseMatrixFile(fileName=postMultFdataDirile) if postMultFile is not None else np.eye(4)
     preMult = parseMatrixFile(fileName=preMultFile) if preMultFile is not None else np.eye(4)
     rotation, translation, matrices = parseTrackingFile(path=dataDir,fileName='poses.txt',preMult=preMult,postMult=postMult)
@@ -70,30 +70,12 @@ def getPairs(path=dataDir,poseFile='poses.txt',preMultFile=None,postMultFile=Non
     notIdentity = np.repeat(translation.all(axis=1),size).reshape((size,size))
     idx = np.flatnonzero(np.all((distRot < maxRot, distTrans < maxTrans, notIdentity),axis=0))
     pairs = np.hstack((idx.reshape((len(idx),1))/size,idx.reshape((len(idx),1))%size))
-    labels = []
-    for f1, f2 in pairs:
+    labels = np.empty((len(pairs),6))
+    for idx, val in enumerate(pairs):
+        f1, f2 = val
         m = matrices[f1].I*matrices[f2]
         rod = cv2.Rodrigues(m[:3,:3])[0]
-        labels.append(np.vstack((m[:3,3],rod)))
-    print "...done matching pairs!"
-    return size, dict(zip(map(tuple, pairs),labels))
+        labels[idx] = np.hstack((m[:3,3].T,rod.T))
+    print "Matchmaker:  ...done matching pairs!"
+    return size, map(tuple, pairs), labels
     
-def loadDataset(path=dataDir, pairLabelsFile='pairLabels.txt', preMultFile='hiBall2Cam.txt'):
-    if os.path.isfile(os.path.join(path, pairLabelsFile)):
-        print "Loading pairs from %s..."%os.path.join(path, pairLabelsFile)
-        size, pairLabels = cPickle.load(open(os.path.join(path, pairLabelsFile), 'r'))
-    else:
-        size, pairLabels = matchmaker.getPairs(path, preMultFile=preMultFile)
-        cPickle.dump([size,pairLabels], open(os.path.join(dataDir, pairLabelsFile), 'w')) 
-    # need to combine color channels with depth channel
-    print "Loading images into memory..."
-    imageSet = [None] * size
-    imgNameFmt = 'img_0_%04d.jpg'
-    for i in range(size):
-        colorP = os.path.join(dataDir, 'color', imgNameFmt%i)
-        depthP = os.path.join(dataDir, 'depth', imgNameFmt%i)
-        if os.path.isfile(colorP) and os.path.isfile(depthP):
-            color = cv2.imread(colorP)
-            depth = cv2.imread(depthP,0)
-            imageSet[i] = np.dstack((color,depth))
-    return pairLabels, imageSet
