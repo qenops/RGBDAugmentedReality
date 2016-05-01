@@ -14,6 +14,7 @@ import re, os, time, datetime, sys
 import numpy as np
 
 # Global flags to control training
+DATA_DIR = '/playpen/tracknet'
 FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_integer('width', 640, """Width of image input""")
@@ -79,9 +80,23 @@ def model(orig_image, comp_image, keep_prob, keep_prob2):
     siam_conv1_b = bias_variable([32])
     orig_conv1 = tf.nn.relu(conv2d_s2(tf.to_float(orig_image), siam_conv1_w) + siam_conv1_b)
     comp_conv1 = tf.nn.relu(conv2d_s2(tf.to_float(comp_image), siam_conv1_w) + siam_conv1_b)
+    bias = tf.nn.bias_add(orig_conv1, siam_conv1_b)
     _activation_summary(orig_conv1)
     orig_pool1 = max_pool_2x2(orig_conv1)
     comp_pool1 = max_pool_2x2(comp_conv1)
+    '''with tf.variable_scope('conv1') as scope:
+        siam_conv1_w = weight_variable([7, 7, 2, 32])
+        siam_conv1_b = bias_variable([32])
+        orig_conv = conv2d_s2(tf.to_float(orig_image), siam_conv1_w)
+        comp_conv = conv2d_s2(tf.to_float(comp_image), siam_conv1_w)
+        orig_bias = tf.nn.bias_add(orig_conv, siam_conv1_b)
+        comp_bias = tf.nn.bias_add(comp_conv, siam_conv1_b)
+        orig_conv1 = tf.nn.relu(orig_bias, name='orig_conv1')
+        comp_conv1 = tf.nn.relu(comp_bias, name='comp_conv1')
+        _activation_summary(orig_conv1)
+    orig_pool1 = max_pool_2x2(orig_conv1)
+    comp_pool1 = max_pool_2x2(comp_conv1)
+    '''
     # 2nd siamese convolutional layer - 16 filters
     # in: 2x240x320x32 
     # out: 2x240x320x16
@@ -157,10 +172,10 @@ def optimizer(loss, learningRate):
     train_op = optimizer.apply_gradients(grads_and_vars) #, global_step=batch)
     return train_op
     
-def train(data_pairs, data_labels, data_images):
+def train(data_pairs, data_labels, data_images, resume=True):
     dataSize = data_labels.shape[0]
     # setup logging to a file
-    logging.basicConfig(filename=os.path.join('logs','train.log'), level=logging.INFO)
+    logging.basicConfig(filename=os.path.join(DATA_DIR,'logs','train.log'), level=logging.INFO)
     # Write down all the FLAGS
     logging.info('FLAG information')
     for key, value in tf.app.flags.FLAGS.__flags.iteritems():
@@ -187,9 +202,15 @@ def train(data_pairs, data_labels, data_images):
     print "TrackNet:  starting session..."
     with tf.Session() as s:
         # Create a saver to store all the variables later
-        saver = tf.train.Saver(tf.all_variables())
-        # Run all the initializers to prepare the trainable parameters.
-        tf.initialize_all_variables().run()
+        saver = tf.train.Saver(tf.all_variables(),keep_checkpoint_every_n_hours=1)
+        ckpt = tf.train.get_checkpoint_state(os.path.join(DATA_DIR,'data'))
+        if resume and ckpt and ckpt.model_checkpoint_path:
+            print "TrackNet:  Loading latest checkpoint %s..."%os.path.join(DATA_DIR,'data',ckpt.model_checkpoint_path)
+            saver.restore(s, os.path.join(DATA_DIR,'data',ckpt.model_checkpoint_path))
+        else:
+            # Run all the initializers to prepare the trainable parameters.
+            print "TrackNet:  Initializing all variables..."
+            tf.initialize_all_variables().run()
         summary_writer = tf.train.SummaryWriter('logs', graph_def=s.graph)
         logging.info('Initialized!')
         # Loop through training steps.
@@ -245,8 +266,13 @@ def train(data_pairs, data_labels, data_images):
                 logging.info('Save the summary information')
                 summary_str = s.run(summary_op, feed_dict)
                 summary_writer.add_summary(summary_str, step)
+            if step % 500 == 0:
+                # Save the current model
+                checkpoint_path = os.path.join(DATA_DIR,'data','model.ckpt')
+                logging.info('Save the model : %s'%(checkpoint_path))
+                saver.save(s, checkpoint_path, global_step=step)
         # Save the last model
-        checkpoint_path = os.path.join('data','model.ckpt')
+        checkpoint_path = os.path.join(DATA_DIR,'data','model.ckpt')
         logging.info('Save the model : %s'%(checkpoint_path))
         saver.save(s, checkpoint_path, global_step=step)
     

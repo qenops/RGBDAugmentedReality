@@ -10,8 +10,8 @@ from scipy.spatial.distance import pdist, squareform
 import math, os
 
 dataDir = os.path.expanduser('/playpen/tracknet/radialCircularWalk/')
-maxTrans = 1500 # units in mm
-maxRot = .85 # units in radians
+maxTrans = 750 # 1500 # units in mm
+maxRot = .5 # .85 # units in radians
 
 # parse the tracking data into memory
 def parseTrackingFile(path=dataDir, fileName='tracking.txt', preMult=np.matrix(np.eye(4)), postMult=np.matrix(np.eye(4))):
@@ -76,6 +76,6 @@ def getPairs(path=dataDir,poseFile='poses.txt',preMultFile=None,postMultFile=Non
         m = matrices[f1].I*matrices[f2]
         rod = cv2.Rodrigues(m[:3,:3])[0]
         labels[idx] = np.hstack((m[:3,3].T,rod.T))
-    print "Matchmaker:  ...done matching pairs!"
+    print "Matchmaker:  ...found %s matching pairs!"%pairs.shape[0]
     return size, map(tuple, pairs), labels
     

@@ -24,6 +24,7 @@ def loadDataset(dataDir, pairLabelsFile='pairLabels.txt', preMultFile='hiBall2Ca
         size, pairs, labels = cPickle.load(open(os.path.join(dataDir, pairLabelsFile), 'r'))
     else:
         size, pairs, labels = matchmaker.getPairs(dataDir, preMultFile=preMultFile)
+        print "TrackNet:  Saving new pairs to %s..."%os.path.join(dataDir, pairLabelsFile)
         cPickle.dump([size,pairs,labels], open(os.path.join(dataDir, pairLabelsFile), 'w')) 
     # need to combine color channels with depth channel
     print "TrackNet:  Loading images into memory..."
@@ -61,6 +62,9 @@ def inputs():
         '/playpen/tracknet/radialCircularWalk/',
     ]
     pairs, labels, images = loadDatasets(listOfDir)
-    # should we shuffle pairs and labels first?
-    
-    return pairs, labels, images
+    # we should shuffle pairs and labels first
+    idxShuffle = range(len(pairs))
+    random.shuffle(idxShuffle)
+    pairShuffle = [pairs[i] for i in idxShuffle]
+    labelShuffle = labels[idxShuffle]
+    return pairShuffle, labelShuffle, images
