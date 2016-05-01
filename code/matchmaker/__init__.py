@@ -10,8 +10,8 @@ from scipy.spatial.distance import pdist, squareform
 import math, os
 
 dataDir = os.path.expanduser('/playpen/tracknet/radialCircularWalk/')
-maxTrans = 750 # 1500 # units in mm
-maxRot = .5 # .85 # units in radians
+maxTrans = 1500 # units in mm # 750
+maxRot = .85 # units in radians # .5
 
 # parse the tracking data into memory
 def parseTrackingFile(path=dataDir, fileName='tracking.txt', preMult=np.matrix(np.eye(4)), postMult=np.matrix(np.eye(4))):
@@ -64,7 +64,7 @@ def getPairs(path=dataDir,poseFile='poses.txt',preMultFile=None,postMultFile=Non
     print "Matchmaker:  creating pairs from %s%s..."%(path,poseFile)
     postMult = parseMatrixFile(fileName=postMultFdataDirile) if postMultFile is not None else np.eye(4)
     preMult = parseMatrixFile(fileName=preMultFile) if preMultFile is not None else np.eye(4)
-    rotation, translation, matrices = parseTrackingFile(path=dataDir,fileName='poses.txt',preMult=preMult,postMult=postMult)
+    rotation, translation, matrices = parseTrackingFile(path=path,fileName='poses.txt',preMult=preMult,postMult=postMult)
     distRot, distTrans = distances(rotation, translation)
     size = len(translation)
     notIdentity = np.repeat(translation.all(axis=1),size).reshape((size,size))

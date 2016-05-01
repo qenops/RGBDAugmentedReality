@@ -30,7 +30,7 @@ tf.app.flags.DEFINE_float('learning_rate', 0.1, """Base Learning rate for all la
 tf.app.flags.DEFINE_float('decay_rate', 0.5, """Learning rate decay rate""")
 tf.app.flags.DEFINE_integer('decay_step', 27, """How many steps to decay the learning rate""")
 tf.app.flags.DEFINE_float('momentum', 0.9, """Momentum used in optimizer""")
-tf.app.flags.DEFINE_integer('num_epochs', 1, """Number of Epochs""")
+tf.app.flags.DEFINE_integer('num_epochs', 3, """Number of Epochs""")
 tf.app.flags.DEFINE_integer('batch_size', 50, """Number of pairs to process in a batch.""")
 tf.app.flags.DEFINE_integer('iter_print_train_info', 50, """Number of iterations to print training Information  """)
 tf.app.flags.DEFINE_string('act','relu', """Activation function used for Student Networks """)
@@ -211,7 +211,7 @@ def train(data_pairs, data_labels, data_images, resume=True):
             # Run all the initializers to prepare the trainable parameters.
             print "TrackNet:  Initializing all variables..."
             tf.initialize_all_variables().run()
-        summary_writer = tf.train.SummaryWriter('logs', graph_def=s.graph)
+        summary_writer = tf.train.SummaryWriter('logs', graph=s.graph)
         logging.info('Initialized!')
         # Loop through training steps.
         numSteps = FLAGS.num_epochs * dataSize // FLAGS.batch_size
@@ -266,7 +266,7 @@ def train(data_pairs, data_labels, data_images, resume=True):
                 logging.info('Save the summary information')
                 summary_str = s.run(summary_op, feed_dict)
                 summary_writer.add_summary(summary_str, step)
-            if step % 500 == 0:
+                #if step % 100 == 0:
                 # Save the current model
                 checkpoint_path = os.path.join(DATA_DIR,'data','model.ckpt')
                 logging.info('Save the model : %s'%(checkpoint_path))

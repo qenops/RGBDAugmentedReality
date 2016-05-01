@@ -14,6 +14,7 @@ import random
 IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 480
 USE_COLOR=False
+DROPOUT = .5
 
 # we need to load the list of tuples - and precompute the labels
 # key = pair tuple
@@ -28,7 +29,7 @@ def loadDataset(dataDir, pairLabelsFile='pairLabels.txt', preMultFile='hiBall2Ca
         cPickle.dump([size,pairs,labels], open(os.path.join(dataDir, pairLabelsFile), 'w')) 
     # need to combine color channels with depth channel
     print "TrackNet:  Loading images into memory..."
-    imageSet = np.empty((size,IMAGE_HEIGHT,IMAGE_WIDTH,2+2*USE_COLOR))
+    imageSet = np.empty((size,IMAGE_HEIGHT,IMAGE_WIDTH,2+2*USE_COLOR),dtype=np.uint8)
     imgNameFmt = 'img_0_%04d.jpg'
     for i in range(size):
         colorP = os.path.join(dataDir, 'color', imgNameFmt%i)
@@ -42,7 +43,7 @@ def loadDataset(dataDir, pairLabelsFile='pairLabels.txt', preMultFile='hiBall2Ca
 def loadDatasets(listOfDir):
     allPairs = []
     allLabels = np.empty((0,6))
-    allImages = np.empty((0,IMAGE_HEIGHT,IMAGE_WIDTH,2+2*USE_COLOR))
+    allImages = np.empty((0,IMAGE_HEIGHT,IMAGE_WIDTH,2+2*USE_COLOR),dtype=np.uint8)
     for idx, dataDir in enumerate(listOfDir):
         pairs, labels, imageSet = loadDataset(dataDir)
         newPairs = [(x+len(allImages),y+len(allImages)) for x, y in pairs]
@@ -60,6 +61,7 @@ def inputs():
     # load datasets into memory 
     listOfDir = [
         '/playpen/tracknet/radialCircularWalk/',
+        '/playpen/tracknet/LivingRoom04/',
     ]
     pairs, labels, images = loadDatasets(listOfDir)
     # we should shuffle pairs and labels first
@@ -67,4 +69,6 @@ def inputs():
     random.shuffle(idxShuffle)
     pairShuffle = [pairs[i] for i in idxShuffle]
     labelShuffle = labels[idxShuffle]
-    return pairShuffle, labelShuffle, images
+    # drop the last DROPOUT pairs
+    keep = int(len(pairShuffle) * (1-DROPOUT))
+    return pairShuffle[:keep], labelShuffle[:keep], images
