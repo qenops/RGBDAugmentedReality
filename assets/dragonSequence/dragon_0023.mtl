@@ -1,0 +1,57 @@
+newmtl blinn1SG
+illum 4
+Kd 0.00 0.00 0.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+map_Kd Tongue-TM_u0_v0.tif
+bump Tongue-NM_u0_v0.tif -bm 0.1
+Ni 1.00
+Ks 0.50 0.50 0.50
+newmtl blinn2SG
+illum 4
+Kd 0.00 0.00 0.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+map_Kd Spines-TM_u0_v0.tif
+bump Spines-NM_u0_v0.tif -bm 0.1
+Ni 1.00
+Ks 0.00 0.00 0.00
+map_Ks Spines-SPEC_u0_v0.tif
+newmtl blinn3SG
+illum 4
+Kd 0.00 0.00 0.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+map_Kd Wings-TM_u0_v0.tif
+bump Wings-NM_u0_v0.tif -bm 0.1
+Ni 1.00
+Ks 0.00 0.00 0.00
+map_Ks Wings-SPEC_u0_v0.tif
+newmtl lambert2SG
+illum 4
+Kd 0.00 0.00 0.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+bump Body-NM_u0_v0_half_v2.tif -bm 0.1
+Ni 1.00
+Ks 0.00 0.00 0.00
+map_Ks Body-SPEC_u0_v0.tif
+newmtl phong1SG
+illum 4
+Kd 0.00 0.00 0.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+map_Kd Eyes-TM_u0_v0.tif
+Ni 1.00
+Ks 0.50 0.50 0.50
+Ns 18.00
+newmtl phong2SG
+illum 4
+Kd 0.00 0.00 0.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+map_Kd Teeth-TM_u0_v0.tif
+bump Teeth-NM_u0_v0.tif -bm 1
+Ni 1.00
+Ks 0.50 0.50 0.50
+Ns 18.00
