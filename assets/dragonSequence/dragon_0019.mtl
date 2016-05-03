@@ -32,6 +32,7 @@ illum 4
 Kd 0.00 0.00 0.00
 Ka 0.00 0.00 0.00
 Tf 1.00 1.00 1.00
+map_Kd Body-TM_u0_v0.tif
 bump Body-NM_u0_v0_half_v2.tif -bm 0.1
 Ni 1.00
 Ks 0.00 0.00 0.00
