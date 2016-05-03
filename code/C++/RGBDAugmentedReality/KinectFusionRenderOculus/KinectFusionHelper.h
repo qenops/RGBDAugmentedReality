@@ -256,17 +256,19 @@ inline std::string to_string(float theValue)
 /// <param name="a">The minimum inclusive threshold.</param>
 /// <param name="b">The maximum inclusive threshold.</param>
 /// <returns>Returns the clamped value.</returns>
-template <typename T>
-inline T clamp(const T& x, const T& a, const T& b)
+namespace kinFu
 {
-    if (x < a)
-        return a;
-    else if (x > b)
-        return b;
-    else
-        return x;
+	template <typename T>
+	inline T clamp(const T& x, const T& a, const T& b)
+	{
+		if (x < a)
+			return a;
+		else if (x > b)
+			return b;
+		else
+			return x;
+	}
 }
-
 /// <summary>
 /// Load an 24bit RGB color from a packed int pixel image and return as float values
 /// </summary>
@@ -338,11 +340,11 @@ inline unsigned int bilinear_sample(const unsigned int *colorImage, float x, flo
     const float xf = x - half - static_cast<float>(xi);
     const float yf = y - half - static_cast<float>(yi);
 
-    const unsigned int posax = clamp<unsigned int>(xi, 0, imageWidth - 1);
-    const unsigned int posay = clamp<unsigned int>(yi, 0, imageHeight - 1);
+    const unsigned int posax = kinFu::clamp<unsigned int>(xi, 0, imageWidth - 1);
+    const unsigned int posay = kinFu::clamp<unsigned int>(yi, 0, imageHeight - 1);
 
-    const unsigned int posbx = clamp<unsigned int>(xi+1, 0, imageWidth - 1);
-    const unsigned int posby = clamp<unsigned int>(yi+1, 0, imageHeight - 1);
+    const unsigned int posbx = kinFu::clamp<unsigned int>(xi+1, 0, imageWidth - 1);
+    const unsigned int posby = kinFu::clamp<unsigned int>(yi+1, 0, imageHeight - 1);
 
     // Load the corners
     Vector3 d00 = load_color(colorImage, posax, posay, imageWidth);

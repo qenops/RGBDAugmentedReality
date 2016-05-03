@@ -183,7 +183,7 @@ KinectFusionRenderOculus::KinectFusionRenderOculus():
 bool KinectFusionRenderOculus::initGLUT(int argc, char* argv[], string name, int windowWidth, int windowHeight)
 {
 	glutInit(&argc, argv);
-	glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGBA);
+	glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGBA|GLUT_ALPHA);
 	glutInitWindowSize(windowWidth, windowHeight);
 	glutCreateWindow(name.c_str());
 	glutDisplayFunc(displayGL);
@@ -246,6 +246,14 @@ bool KinectFusionRenderOculus::Run(int argc, char * argv[])
 	std::cout << "EyePoseLeft" << m_leftEyeTrans.x << "  " << m_leftEyeTrans.y << m_leftEyeTrans.z << endl;
 	m_osystem->GetIdealRenderSize(m_leftTextureSize, m_rightTextureSize);
 	m_osystem->GetEyeFOVFromHMD(m_leftEyeFOV,m_rightEyeFOV);
+	char dynamicMeshesDataPath[256], shaderPath[256];
+	sprintf_s(dynamicMeshesDataPath, "./Models\\9KinectFinal\\Best_2\\");
+	//sprintf_s(dynamicMeshesDataPath, "F:\\arkhalid\\Google Drive\\ToMapWork\\Courses\\4th Semester\\Virtual Worlds\\Project\\RGBDAugmentedReality\\assets\\dragonSequence\\");
+	sprintf_s(shaderPath, "./Shaders\\");
+	m_osystem->setDynamicMeshesDataPath(dynamicMeshesDataPath);
+	m_osystem->setShaderPath(shaderPath);
+	m_osystem->compileShaders();
+	m_osystem->InitScene();
 	if (!CreateRenderObjectsForOculus())
 	{
 		cout << "couldn't generate render object for oculus" << endl;
@@ -278,7 +286,7 @@ bool KinectFusionRenderOculus::Run(int argc, char * argv[])
 	{
 		std::cout << "KinectFusionAdvanced could not be  initialised Properly" << endl;
 	}
-
+	m_lastTime = clock();
 	glutMainLoop();
 	return true;
 
@@ -607,7 +615,12 @@ void KinectFusionRenderOculus::display()
 	glClear(GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_DEPTH_TEST);
 	//m_osystem->Render();
-	if (!RenderForOculus())
+
+	//if (!RenderForOculus())
+	//{
+	//cout << "Couldn't render frame to Oculus" << endl;
+	//}
+	if (!RenderForOculusAdvanced())
 	{
 	cout << "Couldn't render frame to Oculus" << endl;
 	}
@@ -2138,7 +2151,7 @@ HRESULT KinectFusionRenderOculus::FindCameraPoseAlignPointClouds()
 	double bestNeighborAlignmentEnergy = m_fMaxAlignPointCloudsEnergyForSuccess;
 
 	// Run alignment with best matched poses (i.e. k nearest neighbors (kNN))
-	unsigned int maxTests = min(m_cMaxCameraPoseFinderPoseTests, cPoses);
+	unsigned int maxTests = std::min(m_cMaxCameraPoseFinderPoseTests, cPoses);
 
 	for (unsigned int n = 0; n < maxTests; n++)
 	{
@@ -2802,6 +2815,7 @@ void KinectFusionRenderOculus::SetIdentityMatrix(Matrix4 &mat)
 
 bool KinectFusionRenderOculus::RenderForOculus()
 {
+
 	Matrix4 leftEye = m_worldToCameraTransform;
 	leftEye.M41 -= m_leftEyeTrans.x;
 	leftEye.M42 += 0.13;
@@ -2821,7 +2835,32 @@ bool KinectFusionRenderOculus::RenderForOculus()
 	m_osystem->Render(*leftEyeTexture,*rightEyeTexture);
 	return true;
 }
+bool KinectFusionRenderOculus::RenderForOculusAdvanced()
+{
+	clock_t currTime = clock();
+	m_deltaTime = float(clock() - m_lastTime) / CLOCKS_PER_SEC;
+	m_lastTime = currTime;
 
+	Matrix4 leftEye = m_worldToCameraTransform;
+	leftEye.M41 -= m_leftEyeTrans.x;
+	leftEye.M42 += 0.13;
+	if (!GenerateTextureToRender(m_pShadedSurfaceLeft, m_pPointCloudOculusLeft, leftEye, *leftEyeTexture))
+	{
+		cout << "couldn't generate Eye texture" << endl;
+		return false;
+	}
+	Matrix4 rightEye = m_worldToCameraTransform;
+	rightEye.M41 -= m_rightEyeTrans.x;
+	rightEye.M42 += 0.13;
+	if (!GenerateTextureToRender(m_pShadedSurfaceRight, m_pPointCloudOculusRight, rightEye, *rightEyeTexture))
+	{
+		cout << "couldn't generate Eye texture" << endl;
+		return false;
+	}
+	//m_osystem->Render(*leftEyeTexture, *rightEyeTexture);
+	m_osystem->Render(*leftEyeTexture, *rightEyeTexture,OVR::Matrix4f::Translation(m_leftEyeTrans.x, m_leftEyeTrans.y, m_leftEyeTrans.z), OVR::Matrix4f::Translation(m_rightEyeTrans.x, m_rightEyeTrans.y, m_rightEyeTrans.z),m_deltaTime);
+	return true;
+}
 bool KinectFusionRenderOculus::CreateRenderObjectsForOculus()
 {
 

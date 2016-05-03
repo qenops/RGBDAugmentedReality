@@ -1150,9 +1150,9 @@ HRESULT ColorResiduals(const NUI_FUSION_IMAGE_FRAME *pFloatDeltaFromReference, c
             if (residue <= 1.0f)   // Pixel byte ordering: ARGB
             {
                 color |= (255 << 24);                                                                               // a
-                color |= (static_cast<unsigned char>(255.0f * clamp(1.0f + residue, 0.0f, 1.0f)) << 16);            // r
-                color |= (static_cast<unsigned char>(255.0f * clamp(1.0f - std::abs(residue), 0.0f, 1.0f)) << 8);   // g
-                color |= (static_cast<unsigned char>(255.0f * clamp(1.0f - residue, 0.0f, 1.0f)));                  // b
+                color |= (static_cast<unsigned char>(255.0f * kinFu::clamp(1.0f + residue, 0.0f, 1.0f)) << 16);            // r
+                color |= (static_cast<unsigned char>(255.0f * kinFu::clamp(1.0f - std::abs(residue), 0.0f, 1.0f)) << 8);   // g
+                color |= (static_cast<unsigned char>(255.0f * kinFu::clamp(1.0f - residue, 0.0f, 1.0f)));                  // b
             }
 
             pColorRow[x] = color;

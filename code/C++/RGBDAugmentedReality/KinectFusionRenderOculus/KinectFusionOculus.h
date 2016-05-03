@@ -11,6 +11,7 @@
 #include "Timer.h"
 #include <opencv2\opencv.hpp>
 #include "KinectFusionHelper.h"
+#include <ctime>
 using namespace std;
 using namespace cv;
 class KinectFusionRenderOculus
@@ -83,12 +84,16 @@ private:
 	void printMat(Matrix4 mat);
 	//Oculus related functions
 	bool RenderForOculus();
+	bool RenderForOculusAdvanced();
 	bool CreateRenderObjectsForOculus();
 	float ComputeFocalLengthFromAngleTan(float tanAngle,float width);
 	NUI_FUSION_CAMERA_PARAMETERS ComputeCamParams(ovrFovPort fov, OVR::Sizei texSize, float correction);
 	HRESULT InitializeFrame(int cImageSize);
 	void FreeBuffers();
 	//Oculus system
+	clock_t m_lastTime;
+	double m_deltaTime;
+
 	OculusSystem* m_osystem;
 	OVR::Vector3f m_rightEyeTrans;
 	OVR::Vector3f m_leftEyeTrans;
@@ -133,6 +138,7 @@ private:
 	cv::Mat						m_floatDepthMapOpenCV;
 	cv::Mat						m_floatColorOpenCV;
 	//Depth in RGBX format
+
 	BYTE* m_pDepthRGBX;
 	BYTE* m_pReconstructionRGBX;
 	BYTE* m_pTrackingDataRGBX;
