@@ -17,7 +17,8 @@ KinectFusionRenderOculus::KinectFusionRenderOculus():
 	m_pDepthStreamHandle(INVALID_HANDLE_VALUE),
 	m_hNextDepthFrameEvent(INVALID_HANDLE_VALUE),
 	m_bTranslateResetPoseByMinDepthThreshold(true),
-	m_bAutoResetReconstructionWhenLost(false),
+	m_bTranslateToCenterOfVolume(false),
+	m_bAutoResetReconstructionWhenLost(true),
 	m_bAutoResetReconstructionOnTimeout(false),
 	m_cLostFrameCounter(0),
 	m_bTrackingFailed(false),
@@ -36,7 +37,50 @@ KinectFusionRenderOculus::KinectFusionRenderOculus():
 	m_bCaptureColor(true),
 	m_bMirrorDepthFrame(false),
 	m_cColorIntegrationInterval(2),
-	m_bNearMode(true)
+	m_bNearMode(true), //should we really
+
+	//For Advanced Process Depth
+	m_bAutoFindCameraPoseWhenLost(true),
+	m_fMaxAlignPointCloudsEnergyForSuccess(0.006f),
+	m_cMaxCameraPoseFinderPoseTests(5),
+	m_cCameraPoseFinderProcessFrameCalculationInterval(5),
+	m_cMaxCameraPoseFinderPoseHistory(NUI_FUSION_CAMERA_POSE_FINDER_DEFAULT_POSE_HISTORY_COUNT),
+	m_cCameraPoseFinderFeatureSampleLocationsPerFrame(NUI_FUSION_CAMERA_POSE_FINDER_DEFAULT_FEATURE_LOCATIONS_PER_FRAME_COUNT),
+	m_fMaxCameraPoseFinderDepthThreshold(NUI_FUSION_CAMERA_POSE_FINDER_DEFAULT_MAX_DEPTH_THRESHOLD),
+	m_fCameraPoseFinderDistanceThresholdReject(1.0f), // a value of 1.0 means no rejection
+	m_fCameraPoseFinderDistanceThresholdAccept(0.1f),
+	m_cMinSuccessfulTrackingFramesForCameraPoseFinder(45), // only update the camera pose finder initially after 45 successful frames (1.5s)
+	m_cMinSuccessfulTrackingFramesForCameraPoseFinderAfterFailure(200), // resume integration following 200 successful frames after tracking failure (~7s)
+	m_cAlignPointCloudsImageDownsampleFactor(2),
+	m_cSmoothingKernelWidth(1),                 // 0=just copy, 1=3x3, 2=5x5, 3=7x7, here we create a 3x3 kernel
+	m_fSmoothingDistanceThreshold(0.04f),       // 4cm, could use up to around 0.1f
+	m_fMaxTranslationDelta(0.3f),				// 0.15 - 0.3m per frame typical
+	m_fMaxRotationDelta(20.0f),          // 10-20 degrees per frame typical
+	m_bTrackingHasFailedPreviously(false),
+	m_bCalculateDeltaFrame(false),
+	m_bIntegrationResumed(false),
+	m_cDeltaFromReferenceFrameCalculationInterval(2),
+	m_fMinAlignPointCloudsEnergyForSuccess(0.0f),
+	m_fMaxAlignToReconstructionEnergyForSuccess(0.15f),
+	m_fMinAlignToReconstructionEnergyForSuccess(0.005f),
+	m_cPixelBufferLength(0),
+	m_pCameraPoseFinder(nullptr),
+	m_pResampledColorImage(nullptr),
+	m_pDepthPointCloud(nullptr),
+	m_pSmoothDepthFloatImage(nullptr),
+	m_pFloatDeltaFromReference(nullptr),
+	m_pDownsampledDepthFloatImage(nullptr),
+	m_pDownsampledSmoothDepthFloatImage(nullptr),
+	m_pDownsampledDepthPointCloud(nullptr),
+	m_cSuccessfulFrameCounter(0),
+	m_pDepthRGBX(nullptr),
+	m_pTrackingDataRGBX(nullptr),
+	m_cbImageSize(0),
+	m_fFramesPerSecond(0),
+	m_bColorCaptured(false),
+	m_deviceMemory(0)
+
+
 {
 	m_osystem = new OculusSystem();
 	//Initialize Depth Image Size
@@ -59,9 +103,9 @@ KinectFusionRenderOculus::KinectFusionRenderOculus():
 	m_RenderTarget = cv::Mat(m_cDepthHeight, m_cDepthWidth, CV_8UC4);
      // Define a cubic Kinect Fusion reconstruction volume,
     // with the Kinect at the center of the front face and the volume directly in front of Kinect.
-    m_reconstructionParams.voxelsPerMeter = 256;// 1000mm / 256vpm = ~3.9mm/voxel    
+    m_reconstructionParams.voxelsPerMeter = 128;// 1000mm / 256vpm = ~3.9mm/voxel    
     m_reconstructionParams.voxelCountX = 512;   // 512 / 256vpm = 2m wide reconstruction
-    m_reconstructionParams.voxelCountY = 384;   // Memory = 512*384*512 * 4bytes per voxel
+    m_reconstructionParams.voxelCountY = 512;   // Memory = 512*384*512 * 4bytes per voxel
     m_reconstructionParams.voxelCountZ = 512;   // This will require a GPU with at least 512MB
 
     // These parameters are for optionally clipping the input depth image 
@@ -69,8 +113,8 @@ KinectFusionRenderOculus::KinectFusionRenderOculus():
     m_fMaxDepthThreshold = NUI_FUSION_DEFAULT_MAXIMUM_DEPTH;    // max depth in meters
 
      // This parameter is the temporal averaging parameter for depth integration into the reconstruction
-    m_cMaxIntegrationWeight = NUI_FUSION_DEFAULT_INTEGRATION_WEIGHT;	// Reasonable for static scenes
-
+    //m_cMaxIntegrationWeight = NUI_FUSION_DEFAULT_INTEGRATION_WEIGHT;	// Reasonable for static scenes
+	m_cMaxIntegrationWeight = 2;
     // This parameter sets whether GPU or CPU processing is used. Note that the CPU will likely be 
     // too slow for real-time processing.
     m_processorType = NUI_FUSION_RECONSTRUCTION_PROCESSOR_TYPE_AMP;
@@ -95,27 +139,47 @@ KinectFusionRenderOculus::KinectFusionRenderOculus():
 		nullptr);
 	
 }
-
-bool KinectFusionRenderOculus::initGL(float l, float r, float t, float b, float n, float f)
-{
-	/*int err = glewInit();
-	if ((err != 0))
+	void KinectFusionRenderOculus::FreeBuffers()
 	{
-		cout << "GLEW could not be initialized!" << endl;
-		cout << "Error code is: " << err << std::endl;
-		return false;
-	}
-	glDisable(GL_CULL_FACE);
-	glEnable(GL_DEPTH_TEST);
-	glEnable(GL_LINE_SMOOTH);
-	glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST);
-	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
-	glClearColor(0, 0, 0, 1); // Black*/
-//	m_projection = getPerspectiveMatrix(l, r, t, b, n, f);
-	//m_view = identity3D();
-	return true;
-}
+		SAFE_DELETE_ARRAY(m_pReconstructionRGBX);
+		SAFE_DELETE_ARRAY(m_pDepthRGBX);
+		SAFE_DELETE_ARRAY(m_pTrackingDataRGBX);
 
+		m_cbImageSize = 0;
+	}
+	HRESULT KinectFusionRenderOculus::InitializeFrame(int cImageSize)
+	{
+		HRESULT hr = S_OK;
+
+
+		ULONG cbImageSize = cImageSize *cBytesPerPixel;
+
+		if (m_cbImageSize != cbImageSize)
+		{
+			FreeBuffers();
+
+			m_cbImageSize = cbImageSize;
+			m_pReconstructionRGBX = new(std::nothrow) BYTE[m_cbImageSize];
+			m_pDepthRGBX = new(std::nothrow) BYTE[m_cbImageSize];
+			m_pTrackingDataRGBX = new(std::nothrow) BYTE[m_cbImageSize];
+
+			if (nullptr != m_pReconstructionRGBX ||
+				nullptr != m_pDepthRGBX ||
+				nullptr != m_pTrackingDataRGBX)
+			{
+				ZeroMemory(m_pReconstructionRGBX, m_cbImageSize);
+				ZeroMemory(m_pDepthRGBX, m_cbImageSize);
+				ZeroMemory(m_pTrackingDataRGBX, m_cbImageSize);
+			}
+			else
+			{
+				FreeBuffers();
+				hr = E_OUTOFMEMORY;
+			}
+		}
+
+		return hr;
+	}
 bool KinectFusionRenderOculus::initGLUT(int argc, char* argv[], string name, int windowWidth, int windowHeight)
 {
 	glutInit(&argc, argv);
@@ -179,6 +243,7 @@ bool KinectFusionRenderOculus::Run(int argc, char * argv[])
 	else
 		printf("All Buffers loaded \n");
 	m_osystem->GetEyePositionsFromHMD(m_leftEyeTrans, m_rightEyeTrans);
+	std::cout << "EyePoseLeft" << m_leftEyeTrans.x << "  " << m_leftEyeTrans.y << m_leftEyeTrans.z << endl;
 	m_osystem->GetIdealRenderSize(m_leftTextureSize, m_rightTextureSize);
 	m_osystem->GetEyeFOVFromHMD(m_leftEyeFOV,m_rightEyeFOV);
 	if (!CreateRenderObjectsForOculus())
@@ -209,6 +274,11 @@ bool KinectFusionRenderOculus::Run(int argc, char * argv[])
 		std::cout << "KinectFusion could not be  initialised Properly" << endl;
 	}
 
+	if (FAILED(InitializeKinectFusionAdvanced()))
+	{
+		std::cout << "KinectFusionAdvanced could not be  initialised Properly" << endl;
+	}
+
 	glutMainLoop();
 	return true;
 
@@ -219,8 +289,235 @@ bool KinectFusionRenderOculus::init()
 	return false;
 }
 
+HRESULT KinectFusionRenderOculus::CreateFrame(
+	NUI_FUSION_IMAGE_TYPE frameType,
+	unsigned int imageWidth,
+	unsigned int imageHeight,
+	NUI_FUSION_IMAGE_FRAME** ppImageFrame)
+{
+	HRESULT hr = S_OK;
+
+	if (nullptr != *ppImageFrame)
+	{
+		// If image size or type has changed, release the old one.
+		if ((*ppImageFrame)->width != imageWidth ||
+			(*ppImageFrame)->height != imageHeight ||
+			(*ppImageFrame)->imageType != frameType)
+		{
+			static_cast<void>(NuiFusionReleaseImageFrame(*ppImageFrame));
+			*ppImageFrame = nullptr;
+		}
+	}
+
+	// Create a new frame as needed.
+	if (nullptr == *ppImageFrame)
+	{
+		hr = NuiFusionCreateImageFrame(
+			frameType,
+			imageWidth,
+			imageHeight,
+			nullptr,
+			ppImageFrame);
+
+		if (FAILED(hr))
+		{
+			cout << "Failed to initialize Kinect Fusion image." << endl;;
+		}
+	}
+	return hr;
+}
+
+HRESULT KinectFusionRenderOculus::InitializeKinectFusionAdvanced()
+{
+	HRESULT hr;
+	unsigned int width = static_cast<UINT>(m_cDepthWidth);
+	unsigned int height = static_cast<UINT>(m_cDepthHeight);
+
+	unsigned int colorWidth = static_cast<UINT>(m_cColorWidth);
+	unsigned int colorHeight = static_cast<UINT>(m_cColorHeight);
+
+	// Calculate the down sampled image sizes, which are used for the AlignPointClouds calculation frames
+	unsigned int downsampledWidth = width / m_cAlignPointCloudsImageDownsampleFactor;
+	unsigned int downsampledHeight = height / m_cAlignPointCloudsImageDownsampleFactor;
+	InitializeFrame(m_cDepthImagePixels);                           
+	// Frames generated from the depth input
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_FLOAT, downsampledWidth, downsampledHeight, &m_pDownsampledDepthFloatImage)))
+	{
+		return hr;
+	}
+
+	// Frame generated from the raw color input of Kinect
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_COLOR, colorWidth, colorHeight, &m_pColorImage)))
+	{
+		return hr;
+	}
+
+	// Frame generated from the raw color input of Kinect for use in the camera pose finder.
+	// Note color will be down-sampled to the depth size if depth and color capture resolutions differ.
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_COLOR, width, height, &m_pResampledColorImage)))
+	{
+		return hr;
+	}
+
+	// Frame re-sampled from the color input of Kinect, aligned to depth - this will be the same size as the depth.
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_COLOR, width, height, &m_pResampledColorImageDepthAligned)))
+	{
+		return hr;
+	}
+
+	// Point Cloud generated from ray-casting the volume
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_POINT_CLOUD, width, height, &m_pRaycastPointCloud)))
+	{
+		return hr;
+	}
+
+	// Point Cloud generated from ray-casting the volume
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_POINT_CLOUD, downsampledWidth, downsampledHeight, &m_pDownsampledRaycastPointCloud)))
+	{
+		return hr;
+	}
 
 
+	// Depth frame generated from ray-casting the volume
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_FLOAT, width, height, &m_pRaycastDepthFloatImage)))
+	{
+		return hr;
+	}
+
+	// Image of the raycast Volume to display
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_COLOR, width, height, &m_pShadedSurface)))
+	{
+		return hr;
+	}
+
+	/*// Image of the raycast Volume with surface normals to display
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_COLOR, width, height, &m_pShadedSurfaceNormals)))
+	{
+		return hr;
+	}
+
+	// Image of the raycast Volume with the captured color to display
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_COLOR, width, height, &m_pCapturedSurfaceColor)))
+	{
+		return hr;
+	}*/
+
+	// Image of the camera tracking deltas to display
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_FLOAT, width, height, &m_pFloatDeltaFromReference)))
+	{
+		return hr;
+	}
+
+	// Image of the camera tracking deltas to display
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_COLOR, width, height, &m_pShadedDeltaFromReference)))
+	{
+		return hr;
+	}
+
+	// Image of the camera tracking deltas to display
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_COLOR, downsampledWidth, downsampledHeight, &m_pDownsampledShadedDeltaFromReference)))
+	{
+		return hr;
+	}
+
+	// Image from input depth for use with AlignPointClouds call
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_FLOAT, width, height, &m_pSmoothDepthFloatImage)))
+	{
+		return hr;
+	}
+
+	// Frames generated from smoothing the depth input
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_FLOAT, downsampledWidth, downsampledHeight, &m_pDownsampledSmoothDepthFloatImage)))
+	{
+		return hr;
+	}
+
+	// Image used in post pose finding success check AlignPointClouds call
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_POINT_CLOUD, width, height, &m_pDepthPointCloud)))
+	{
+		return hr;
+	}
+
+	// Point Cloud generated from depth input, in local camera coordinate system
+	if (FAILED(hr = CreateFrame(NUI_FUSION_IMAGE_TYPE_POINT_CLOUD, downsampledWidth, downsampledHeight, &m_pDownsampledDepthPointCloud)))
+	{
+		return hr;
+	}
+
+	if (nullptr != m_pDepthImagePixelBuffer)
+	{
+		// If buffer length has changed, delete the old one.
+		if (m_cDepthImagePixels != m_cPixelBufferLength)
+		{
+			SAFE_DELETE_ARRAY(m_pDepthImagePixelBuffer);
+		}
+	}
+
+	if (nullptr == m_pDepthImagePixelBuffer)
+	{
+		// Depth pixel array to capture data from Kinect sensor
+		m_pDepthImagePixelBuffer =
+			new(std::nothrow) NUI_DEPTH_IMAGE_PIXEL[m_cDepthImagePixels];
+
+		if (nullptr == m_pDepthImagePixelBuffer)
+		{
+			cout<<"Failed to initialize Kinect Fusion depth image pixel buffer."<<endl;
+			return hr;
+		}
+
+		m_cPixelBufferLength = m_cDepthImagePixels;
+	}
+
+	if (nullptr != m_pColorCoordinates)
+	{
+		// If buffer length has changed, delete the old one.
+		if (m_cDepthImagePixels != m_cColorCoordinateBufferLength)
+		{
+			SAFE_DELETE_ARRAY(m_pColorCoordinates);
+		}
+	}
+
+	if (nullptr == m_pColorCoordinates)
+	{
+		// Color coordinate array to capture data from Kinect sensor and for color to depth mapping
+		// Note: this must be the same size as the depth
+		m_pColorCoordinates =
+			new(std::nothrow) NUI_COLOR_IMAGE_POINT[m_cDepthImagePixels];
+
+		if (nullptr == m_pColorCoordinates)
+		{
+			cout << "Failed to initialize Kinect Fusion color image coordinate buffers." << endl;
+			return hr;
+		}
+
+		m_cColorCoordinateBufferLength = m_cDepthImagePixels;
+	}
+
+	if (nullptr != m_pCameraPoseFinder)
+	{
+		SafeRelease(m_pCameraPoseFinder);
+	}
+
+	// Create the camera pose finder if necessary
+	if (nullptr == m_pCameraPoseFinder)
+	{
+		NUI_FUSION_CAMERA_POSE_FINDER_PARAMETERS cameraPoseFinderParameters;
+
+		cameraPoseFinderParameters.featureSampleLocationsPerFrameCount = m_cCameraPoseFinderFeatureSampleLocationsPerFrame;
+		cameraPoseFinderParameters.maxPoseHistoryCount = m_cMaxCameraPoseFinderPoseHistory;
+		cameraPoseFinderParameters.maxDepthThreshold = m_fMaxCameraPoseFinderDepthThreshold;
+
+		if (FAILED(hr = NuiFusionCreateCameraPoseFinder(
+			&cameraPoseFinderParameters,
+			nullptr,
+			&m_pCameraPoseFinder)))
+		{
+			return hr;
+		}
+	} 
+	cout << "Kinect Fusion Advanced Initialised" << endl;
+	return hr;
+}
 bool KinectFusionRenderOculus::initKinect()
 {
 		INuiSensor * pNuiSensor;
@@ -359,6 +656,190 @@ bool KinectFusionRenderOculus::AcquireColor()
 	return true;
 }
 
+void KinectFusionRenderOculus::SetTrackingSucceeded()
+{
+	m_cLostFrameCounter = 0;
+	m_cSuccessfulFrameCounter++;
+	m_bTrackingFailed = false;
+}
+
+HRESULT KinectFusionRenderOculus::SetReferenceFrame(const Matrix4 &worldToCamera)
+{
+	HRESULT hr = S_OK;
+
+	// Raycast to get the predicted previous frame to align against in the next frame
+	hr = m_pVolume->CalculatePointCloudAndDepth(
+		m_pRaycastPointCloud,
+		m_pRaycastDepthFloatImage,
+		nullptr,
+		&worldToCamera);
+
+	if (FAILED(hr))
+	{
+		cout<<"Kinect Fusion CalculatePointCloud call failed."<<endl;
+		return hr;
+	}
+
+	// Set this frame as a reference for AlignDepthFloatToReconstruction
+	hr = m_pVolume->SetAlignDepthFloatToReconstructionReferenceFrame(m_pRaycastDepthFloatImage);
+
+	if (FAILED(hr))
+	{
+		cout<<"Kinect Fusion SetAlignDepthFloatToReconstructionReferenceFrame call failed."<<endl;
+		return hr;
+	}
+	return hr;
+}
+
+void KinectFusionRenderOculus::SetTrackingFailed()
+{
+	m_cLostFrameCounter++;
+	m_cSuccessfulFrameCounter = 0;
+	m_bTrackingFailed = true;
+	m_bTrackingHasFailedPreviously = true;
+
+	m_bIntegrationResumed = false;
+}
+bool KinectFusionRenderOculus::GetKinectFrames(bool &colorSynchronized)
+{
+	m_currentDepthFrameTime = 0;
+	m_currentColorFrameTime = 0;
+	colorSynchronized = true;   // assume we are synchronized to start with
+
+								////////////////////////////////////////////////////////
+								// Get an extended depth frame from Kinect
+
+	if (!AquireDepth())
+	{
+		return false;
+	}
+	else
+	{
+		
+	}
+
+
+	////////////////////////////////////////////////////////
+	// Get a color frame from Kinect
+	if (!AcquireColor())
+	{
+		return false;
+	}
+	else
+	{
+
+	}
+
+	// Check color and depth frame timestamps to ensure they were captured at the same time
+	// If not, we attempt to re-synchronize by getting a new frame from the stream that is behind.
+	int timestampDiff = static_cast<int>(abs(m_currentColorFrameTime - m_currentDepthFrameTime));
+
+	if (timestampDiff >= cMinTimestampDifferenceForFrameReSync && m_cSuccessfulFrameCounter > 0 && (m_bAutoFindCameraPoseWhenLost || m_bCaptureColor))
+	{
+		bool colorSucceeded = false;
+		// Get another frame to try and re-sync
+		if (m_currentColorFrameTime - m_currentDepthFrameTime >= cMinTimestampDifferenceForFrameReSync)
+		{
+			// Perform camera tracking only from this current depth frame
+			if (nullptr != m_pVolume)
+			{
+				// Convert the pixels describing extended depth as unsigned short type in millimeters to depth
+				// as floating point type in meters.
+				HRESULT hr = m_pVolume->DepthToDepthFloatFrame(
+					m_pDepthImagePixelBuffer,
+					m_cDepthImagePixels * sizeof(NUI_DEPTH_IMAGE_PIXEL),
+					m_pDepthFloatImage,
+					m_fMinDepthThreshold,
+					m_fMaxDepthThreshold,
+					m_bMirrorDepthFrame);
+
+				if (FAILED(hr))
+				{
+					cout<<"Kinect Fusion NuiFusionDepthToDepthFloatFrame call failed."<<endl;
+					return false;
+				}
+
+				Matrix4 calculatedCameraPose = m_worldToCameraTransform;
+				FLOAT alignmentEnergy = 1.0f;
+
+				hr = TrackCameraAlignPointClouds(calculatedCameraPose, alignmentEnergy);
+
+				if (SUCCEEDED(hr))
+				{
+					m_worldToCameraTransform = calculatedCameraPose;
+
+					// Raycast and set reference frame for tracking with AlignDepthFloatToReconstruction
+					hr = SetReferenceFrame(m_worldToCameraTransform);
+					SetTrackingSucceeded();
+				}
+				else
+				{
+					SetTrackingFailed();
+				}
+			}
+
+			// Get another depth frame to try and re-sync as color ahead of depth
+			if (!AquireDepth())
+			{
+				cout << "Kinect Depth stream NuiImageStreamReleaseFrame call failed." << endl;
+				return false;
+			}
+		}
+		else if (m_currentDepthFrameTime - m_currentColorFrameTime >= cMinTimestampDifferenceForFrameReSync && WaitForSingleObject(m_hNextColorFrameEvent, 0) != WAIT_TIMEOUT)
+		{
+			// Get another color frame to try and re-sync as depth ahead of color and there is another color frame waiting
+			bool colorSucceeded = AcquireColor();
+			if (!colorSucceeded)
+			{
+				colorSynchronized = false;
+			}
+
+		}
+
+		timestampDiff = static_cast<int>(abs(m_currentColorFrameTime - m_currentDepthFrameTime));
+
+		// If the difference is still too large, we do not want to integrate color
+		if (timestampDiff > cMinTimestampDifferenceForFrameReSync || !(colorSucceeded))
+		{
+			colorSynchronized = false;
+		}
+		else
+		{
+			colorSynchronized = true;
+		}
+	}
+
+	////////////////////////////////////////////////////////
+	// To enable playback of a .xed file through Kinect Studio and reset of the reconstruction
+	// if the .xed loops, we test for when the frame timestamp has skipped a large number. 
+	// Note: this will potentially continually reset live reconstructions on slow machines which
+	// cannot process a live frame in less time than the reset threshold. Increase the number of
+	// milliseconds in cResetOnTimeStampSkippedMilliseconds if this is a problem.
+
+	int cResetOnTimeStampSkippedMilliseconds = cResetOnTimeStampSkippedMillisecondsGPU;
+
+	/*	
+	if (m_bAutoResetReconstructionOnTimeout && m_cFrameCounter != 0 && nullptr != m_pVolume
+		&& abs(m_currentDepthFrameTime - m_cLastDepthFrameTimeStamp) > cResetOnTimeStampSkippedMilliseconds)
+	{
+		HRESULT hr = ResetReconstruction();
+
+		if (SUCCEEDED(hr))
+		{
+			cout<<"Reconstruction has been reset."<<endl;
+		}
+		else
+		{
+			cout << "Failed to reset reconstruction." << endl;
+		}
+	}
+	*/
+	m_cLastDepthFrameTimeStamp = m_currentDepthFrameTime;
+	m_cLastColorFrameTimeStamp = m_currentColorFrameTime;
+
+	return true;
+}
+
 void KinectFusionRenderOculus::ProcessDepth()
 {
 	if (m_bInitializeError)
@@ -433,8 +914,8 @@ void KinectFusionRenderOculus::ProcessDepth()
 	// Note: this will potentially continually reset live reconstructions on slow machines which
 	// cannot process a live frame in less time than the reset threshold. Increase the number of
 	// milliseconds in cResetOnTimeStampSkippedMilliseconds if this is a problem.
-/*	if (m_bAutoResetReconstructionOnTimeout &&  m_cFrameCounter != 0
-		&& abs(currentDepthFrameTime - m_cLastDepthFrameTimeStamp) > cResetOnTimeStampSkippedMilliseconds)
+	if (m_bAutoResetReconstructionOnTimeout &&  m_cFrameCounter != 0
+		&& abs(m_currentDepthFrameTime - m_cLastDepthFrameTimeStamp) > cResetOnTimeStampSkippedMillisecondsGPU)
 	{
 		ResetReconstruction();
 
@@ -442,7 +923,7 @@ void KinectFusionRenderOculus::ProcessDepth()
 		{
 			return;
 		}
-	}*/
+	}
 
 	m_cLastDepthFrameTimeStamp = m_currentDepthFrameTime;
 	m_cLastColorFrameTimeStamp = m_currentColorFrameTime;
@@ -520,7 +1001,7 @@ void KinectFusionRenderOculus::ProcessDepth()
 		}
 	}
 	GenerateTextureToRender();
-/*	if (m_bAutoResetReconstructionWhenLost && m_bTrackingFailed && m_cLostFrameCounter >= cResetOnNumberOfLostFrames)
+	if (m_bAutoResetReconstructionWhenLost && m_bTrackingFailed && m_cLostFrameCounter >= cResetOnNumberOfLostFrames)
 	{
 		// Automatically clear volume and reset tracking if tracking fails
 		hr = ResetReconstruction();
@@ -531,8 +1012,8 @@ void KinectFusionRenderOculus::ProcessDepth()
 		}
 
 		// Set bad tracking message
-		SetStatusMessage(L"Kinect Fusion camera tracking failed, automatically reset volume.");
-	}*/
+		cout<<L"Kinect Fusion camera tracking failed, automatically reset volume."<<endl;
+	}
 
 	////////////////////////////////////////////////////////
 	// CalculatePointCloud
@@ -651,9 +1132,6 @@ bool KinectFusionRenderOculus::GenerateTextureToRender()
 		std::cout << "Kinect Fusion CalculatePointCloud call failed." << endl;
 		return false;
 	}
-	//hr = NuiFusionShadePointCloud(m_pPointCloud, &worldToCamera, nullptr, m_pShadedSurface, nullptr);
-	////////////////////////////////////////////////////////
-	// ShadePointCloud
 
 	if (!m_bCaptureColor)
 	{
@@ -707,7 +1185,11 @@ bool KinectFusionRenderOculus::GenerateTextureToRender(NUI_FUSION_IMAGE_FRAME* p
 		std::cout << "Kinect Fusion CalculatePointCloud call failed." << endl;
 		return false;
 	}
-
+	if (!m_bCaptureColor)
+	{
+		hr = NuiFusionShadePointCloud(pCloud, &worldToCamera, nullptr, pShadedSurface, nullptr);
+	}
+	//
 	// Draw the shaded raycast volume image
 	INuiFrameTexture * pShadedImageTexture = pShadedSurface->pFrameTexture;
 	NUI_LOCKED_RECT ShadedLockedRect;
@@ -791,7 +1273,9 @@ void KinectFusionRenderOculus::Update()
 	//Should color be here???
 	if (WAIT_OBJECT_0 == WaitForSingleObject(m_hNextDepthFrameEvent, 0))
 	{
+		//GetKinectFrames(colorSynchronized);
 		ProcessDepth();
+		//ProcessDepthAdvanced();
 	}
 }
 
@@ -873,7 +1357,7 @@ HRESULT KinectFusionRenderOculus::InitializeKinectFusion()
 		return hr;
 	}
 
-	/*if (m_bTranslateResetPoseByMinDepthThreshold)
+	if (m_bTranslateToCenterOfVolume)
 	{
 		// This call will set the world-volume transformation
 		hr = ResetReconstruction();
@@ -881,7 +1365,7 @@ HRESULT KinectFusionRenderOculus::InitializeKinectFusion()
 		{
 			return hr;
 		}
-	}*/
+	}
 
 	// Frames generated from the depth input
 	hr = NuiFusionCreateImageFrame(NUI_FUSION_IMAGE_TYPE_FLOAT, m_cDepthWidth, m_cDepthHeight, nullptr, &m_pDepthFloatImage);
@@ -948,6 +1432,91 @@ HRESULT KinectFusionRenderOculus::InitializeKinectFusion()
 
 	m_fStartTime = m_timer.AbsoluteTime();
 	cout << "Kinect Fusion Initialised" << endl;
+
+	return hr;
+}
+/// <summary>
+/// Reset the tracking flags
+/// </summary>
+void KinectFusionRenderOculus::ResetTracking()
+{
+	m_bTrackingFailed = false;
+	m_bTrackingHasFailedPreviously = false;
+
+	m_cLostFrameCounter = 0;
+	m_cSuccessfulFrameCounter = 0;
+
+	m_bIntegrationResumed = true;
+	// Reset pause and signal that the integration resumed
+	//remove any attempt to pause integration
+
+	
+
+	if (nullptr != m_pCameraPoseFinder)
+	{
+		m_pCameraPoseFinder->ResetCameraPoseFinder();
+	}
+}
+HRESULT KinectFusionRenderOculus::ResetReconstruction()
+{
+	if (nullptr == m_pVolume)
+	{
+		return E_FAIL;
+	}
+
+	HRESULT hr = S_OK;
+
+	SetIdentityMatrix(m_worldToCameraTransform);
+	
+	//Translate to center of voulme as that ismore appropriate for our task
+	if (m_bTranslateToCenterOfVolume)
+	{
+		Matrix4 worldToVolumeTransform = m_defaultWorldToVolumeTransform;
+		worldToVolumeTransform.M41 = m_reconstructionParams.voxelCountX / 2;
+		worldToVolumeTransform.M42 = m_reconstructionParams.voxelCountY / 2;
+		worldToVolumeTransform.M43 = m_reconstructionParams.voxelCountZ / 2;
+		hr = m_pVolume->ResetReconstruction(&m_worldToCameraTransform, &worldToVolumeTransform);
+	}
+	// Translate the reconstruction volume location away from the world origin by an amount equal
+	// to the minimum depth threshold. This ensures that some depth signal falls inside the volume.
+	// If set false, the default world origin is set to the center of the front face of the 
+	// volume, which has the effect of locating the volume directly in front of the initial camera
+	// position with the +Z axis into the volume along the initial camera direction of view.
+	
+	else if (m_bTranslateResetPoseByMinDepthThreshold)
+	{
+		Matrix4 worldToVolumeTransform = m_defaultWorldToVolumeTransform;
+
+		// Translate the volume in the Z axis by the minDepthThreshold distance
+		float minDist = (m_fMinDepthThreshold < m_fMaxDepthThreshold) ? m_fMinDepthThreshold : m_fMaxDepthThreshold;
+		worldToVolumeTransform.M43 -= (minDist * m_reconstructionParams.voxelsPerMeter);
+
+		hr = m_pVolume->ResetReconstruction(&m_worldToCameraTransform, &worldToVolumeTransform);
+	}
+	else
+	{
+		hr = m_pVolume->ResetReconstruction(&m_worldToCameraTransform, nullptr);
+	}
+
+	m_cLostFrameCounter = 0;
+	m_cFrameCounter = 0;
+	m_fStartTime = m_timer.AbsoluteTime();
+
+	if (SUCCEEDED(hr))
+	{
+		m_bTrackingFailed = false;
+
+		cout << "Reconstruction has been reset." << endl;;
+	}
+	else
+	{
+		cout << "Failed to reset reconstruction." << endl;
+	}
+
+	if (SUCCEEDED(hr))
+	{
+		ResetTracking();
+	}
 
 	return hr;
 }
@@ -1140,6 +1709,947 @@ HRESULT KinectFusionRenderOculus::CopyColor(NUI_IMAGE_FRAME &imageFrame)
 	return hr;
 }
 
+bool KinectFusionRenderOculus::IsCameraPoseFinderAvailable()
+{
+	return m_bAutoFindCameraPoseWhenLost
+		&& (nullptr != m_pCameraPoseFinder)
+		&& m_pCameraPoseFinder->GetStoredPoseCount() > 0;
+}
+
+HRESULT KinectFusionRenderOculus::StoreImageToFrameBuffer(
+	const NUI_FUSION_IMAGE_FRAME* imageFrame,
+	BYTE* buffer)
+{
+
+	HRESULT hr = S_OK;
+
+	if (nullptr == imageFrame || nullptr == imageFrame->pFrameTexture || nullptr == buffer)
+	{
+		return E_INVALIDARG;
+	}
+
+	if (NUI_FUSION_IMAGE_TYPE_COLOR != imageFrame->imageType &&
+		NUI_FUSION_IMAGE_TYPE_FLOAT != imageFrame->imageType)
+	{
+		return E_INVALIDARG;
+	}
+
+	if (0 == imageFrame->width || 0 == imageFrame->height)
+	{
+		return E_NOINTERFACE;
+	}
+
+	INuiFrameTexture *imageFrameTexture = imageFrame->pFrameTexture;
+	NUI_LOCKED_RECT LockedRect;
+
+	// Lock the frame data so the Kinect knows not to modify it while we're reading it
+	imageFrameTexture->LockRect(0, &LockedRect, nullptr, 0);
+
+	// Make sure we've received valid data
+	if (LockedRect.Pitch != 0)
+	{
+		// Convert from floating point depth if required
+		if (NUI_FUSION_IMAGE_TYPE_FLOAT == imageFrame->imageType)
+		{
+			// Depth ranges set here for better visualization, and map to black at 0 and white at 4m
+			const FLOAT range = 4.0f;
+			const FLOAT oneOverRange = (1.0f / range) * 256.0f;
+			const FLOAT minRange = 0.0f;
+
+			const float *pFloatBuffer = reinterpret_cast<float *>(LockedRect.pBits);
+
+			Concurrency::parallel_for(0u, imageFrame->height, [&](unsigned int y)
+			{
+				unsigned int* pColorRow = reinterpret_cast<unsigned int*>(reinterpret_cast<unsigned char*>(buffer) + (y * LockedRect.Pitch));
+				const float* pFloatRow = reinterpret_cast<const float*>(reinterpret_cast<const unsigned char*>(pFloatBuffer) + (y * LockedRect.Pitch));
+
+				for (unsigned int x = 0; x < imageFrame->width; ++x)
+				{
+					float depth = pFloatRow[x];
+
+					// Note: Using conditionals in this loop could degrade performance.
+					// Consider using a lookup table instead when writing production code.
+					BYTE intensity = (depth >= minRange) ?
+						static_cast<BYTE>((int)((depth - minRange) * oneOverRange) % 256) :
+						0; // % 256 to enable it to wrap around after the max range
+
+					pColorRow[x] = (255 << 24) | (intensity << 16) | (intensity << 8) | intensity;
+				}
+			});
+		}
+		else	// already in 4 bytes per int (RGBA/BGRA) format
+		{
+			const size_t destPixelCount =
+				m_cDepthWidth * m_cDepthHeight;
+
+			BYTE * pBuffer = (BYTE *)LockedRect.pBits;
+
+			// Draw the data with Direct2D
+			memcpy_s(
+				buffer,
+				destPixelCount * cBytesPerPixel,
+				pBuffer,
+				imageFrame->width * imageFrame->height * cBytesPerPixel);
+		}
+	}
+	else
+	{
+		return E_NOINTERFACE;
+	}
+
+	// We're done with the texture so unlock it
+	imageFrameTexture->UnlockRect(0);
+
+	return hr;
+}
+/// <summary>
+/// Perform camera tracking using AlignDepthFloatToReconstruction
+/// </summary>
+/// <returns>S_OK on success, otherwise failure code</returns>
+HRESULT KinectFusionRenderOculus::TrackCameraAlignDepthFloatToReconstruction(Matrix4 &calculatedCameraPose, FLOAT &alignmentEnergy)
+{
+	HRESULT hr = S_OK;
+
+	// Only calculate the residual delta from reference frame every m_cDeltaFromReferenceFrameCalculationInterval
+	// frames to reduce computation time
+	HRESULT tracking = S_OK;
+
+	if (m_bCalculateDeltaFrame)
+	{
+		tracking = m_pVolume->AlignDepthFloatToReconstruction(
+			m_pDepthFloatImage,
+			NUI_FUSION_DEFAULT_ALIGN_ITERATION_COUNT,
+			m_pFloatDeltaFromReference,
+			&alignmentEnergy,
+			&calculatedCameraPose);
+	}
+	else
+	{
+		tracking = m_pVolume->AlignDepthFloatToReconstruction(
+			m_pDepthFloatImage,
+			NUI_FUSION_DEFAULT_ALIGN_ITERATION_COUNT,
+			nullptr,
+			&alignmentEnergy,
+			&calculatedCameraPose);
+	}
+
+	bool trackingSuccess = !(FAILED(tracking) || alignmentEnergy > m_fMaxAlignToReconstructionEnergyForSuccess || (alignmentEnergy == 0.0f && m_cSuccessfulFrameCounter > 1));
+
+	if (trackingSuccess)
+	{
+		// Get the camera pose
+		m_pVolume->GetCurrentWorldToCameraTransform(&calculatedCameraPose);
+	}
+	else
+	{
+		if (FAILED(tracking))
+		{
+			hr = tracking;
+		}
+		else
+		{
+			// We failed in the energy check
+			hr = E_NUI_FUSION_TRACKING_ERROR;
+		}
+	}
+
+	return hr;
+}
+
+/// <summary>
+/// Perform camera tracking using AlignPointClouds
+/// </summary>
+HRESULT KinectFusionRenderOculus::TrackCameraAlignPointClouds(Matrix4 &calculatedCameraPose, FLOAT &alignmentEnergy)
+{
+
+	////////////////////////////////////////////////////////
+	// Down sample the depth image
+
+	HRESULT hr = DownsampleFrameNearestNeighbor(
+		m_pDepthFloatImage,
+		m_pDownsampledDepthFloatImage,
+		m_cAlignPointCloudsImageDownsampleFactor);
+
+	if (FAILED(hr))
+	{
+		cout<<"Kinect Fusion DownsampleFrameNearestNeighbor call failed."<<endl;
+		return hr;
+	}
+
+	////////////////////////////////////////////////////////
+	// Smooth depth image
+
+	hr = m_pVolume->SmoothDepthFloatFrame(
+		m_pDownsampledDepthFloatImage,
+		m_pDownsampledSmoothDepthFloatImage,
+		m_cSmoothingKernelWidth,
+		m_fSmoothingDistanceThreshold);
+
+	if (FAILED(hr))
+	{
+		cout<<"Kinect Fusion SmoothDepth call failed."<<endl;
+		return hr;
+	}
+
+	////////////////////////////////////////////////////////
+	// Calculate Point Cloud from smoothed input Depth Image
+
+	hr = NuiFusionDepthFloatFrameToPointCloud(
+		m_pDownsampledSmoothDepthFloatImage,
+		m_pDownsampledDepthPointCloud);
+
+	if (FAILED(hr))
+	{
+		cout<<"Kinect Fusion NuiFusionDepthFloatFrameToPointCloud call failed."<<endl;
+		return hr;
+	}
+
+	////////////////////////////////////////////////////////
+	// CalculatePointCloud
+
+	// Raycast even if camera tracking failed, to enable us to visualize what is 
+	// happening with the system
+	hr = m_pVolume->CalculatePointCloud(
+		m_pDownsampledRaycastPointCloud,
+		nullptr,
+		&calculatedCameraPose);
+
+	if (FAILED(hr))
+	{
+		cout<<L"Kinect Fusion CalculatePointCloud call failed."<<endl;
+		return hr;
+	}
+
+	////////////////////////////////////////////////////////
+	// Call AlignPointClouds
+
+	HRESULT tracking = S_OK;
+
+	// Only calculate the residual delta from reference frame every m_cDeltaFromReferenceFrameCalculationInterval
+	// frames to reduce computation time
+	if (m_bCalculateDeltaFrame)
+	{
+		tracking = NuiFusionAlignPointClouds(
+			m_pDownsampledRaycastPointCloud,
+			m_pDownsampledDepthPointCloud,
+			NUI_FUSION_DEFAULT_ALIGN_ITERATION_COUNT,
+			m_pDownsampledShadedDeltaFromReference,
+			&calculatedCameraPose);
+
+		// Up sample the delta from reference image to display as the original resolution
+		hr = UpsampleFrameNearestNeighbor(
+			m_pDownsampledShadedDeltaFromReference,
+			m_pShadedDeltaFromReference,
+			m_cAlignPointCloudsImageDownsampleFactor);
+
+		if (FAILED(hr))
+		{
+			cout<<"Kinect Fusion UpsampleFrameNearestNeighbor call failed."<<endl;
+			return hr;
+		}
+	}
+	else
+	{
+		tracking = NuiFusionAlignPointClouds(
+			m_pDownsampledRaycastPointCloud,
+			m_pDownsampledDepthPointCloud,
+			NUI_FUSION_DEFAULT_ALIGN_ITERATION_COUNT,
+			nullptr,
+			&calculatedCameraPose);
+	}
+
+	if (!FAILED(tracking))
+	{
+		// Perform additional transform magnitude check
+		// Camera Tracking has converged but did we get a sensible pose estimate?
+		// see if relative rotation and translation exceed thresholds 
+		if (CameraTransformFailed(
+			m_worldToCameraTransform,
+			calculatedCameraPose,
+			m_fMaxTranslationDelta,
+			m_fMaxRotationDelta))
+		{
+			// We calculated too large a move for this to be a sensible estimate,
+			// quite possibly the camera tracking drifted. Force camera pose finding.
+			hr = E_NUI_FUSION_TRACKING_ERROR;
+
+			cout<<"Kinect Fusion AlignPointClouds camera tracking failed "<<"in transform magnitude check!"<<endl;
+		}
+	}
+	else
+	{
+		hr = tracking;
+	}
+
+	return hr;
+}
+
+/// Process the color image for the camera pose finder.
+/// </summary>
+/// <returns>S_OK on success, otherwise failure code</returns>
+HRESULT KinectFusionRenderOculus::ProcessColorForCameraPoseFinder(bool &resampled)
+{
+	HRESULT hr = S_OK;
+
+	// If color and depth are different resolutions we first we re-sample the color frame using nearest neighbor
+	// before passing to the CameraPoseFinder
+	if (m_cDepthImagePixels != m_cColorImagePixels)
+	{
+		if (m_pColorImage->width > m_pResampledColorImage->width)
+		{
+			// Down-sample
+			unsigned int factor = m_pColorImage->width / m_pResampledColorImage->width;
+			hr = DownsampleFrameNearestNeighbor(m_pColorImage, m_pResampledColorImage, factor);
+
+			if (FAILED(hr))
+			{
+				cout<<"Kinect Fusion DownsampleFrameNearestNeighbor call failed."<<endl;
+				return hr;
+			}
+		}
+		else
+		{
+			// Up-sample
+			unsigned int factor = m_pResampledColorImage->width / m_pColorImage->width;
+			hr = UpsampleFrameNearestNeighbor(m_pColorImage, m_pResampledColorImage, factor);
+
+			if (FAILED(hr))
+			{
+				cout<<"Kinect Fusion UpsampleFrameNearestNeighbor call failed."<<endl;
+				return hr;
+			}
+		}
+
+		resampled = true;
+	}
+	else
+	{
+		resampled = false;
+	}
+
+	return hr;
+}
+
+/// Perform camera pose finding when tracking is lost using AlignPointClouds.
+/// This is typically more successful than FindCameraPoseAlignDepthFloatToReconstruction.
+/// </summary>
+HRESULT KinectFusionRenderOculus::FindCameraPoseAlignPointClouds()
+{
+	HRESULT hr = S_OK;
+
+	if (!IsCameraPoseFinderAvailable())
+	{
+		return E_FAIL;
+	}
+
+	bool resampled = false;
+
+	hr = ProcessColorForCameraPoseFinder(resampled);
+
+	if (FAILED(hr))
+	{
+		return hr;
+	}
+
+	// Start  kNN (k nearest neighbors) camera pose finding
+	INuiFusionMatchCandidates *pMatchCandidates = nullptr;
+
+	// Test the camera pose finder to see how similar the input images are to previously captured images.
+	// This will return an error code if there are no matched frames in the camera pose finder database.
+	hr = m_pCameraPoseFinder->FindCameraPose(
+		m_pDepthFloatImage,
+		resampled ? m_pResampledColorImage : m_pColorImage,
+		&pMatchCandidates);
+
+	if (FAILED(hr) || nullptr == pMatchCandidates)
+	{
+		goto FinishFrame;
+	}
+
+	unsigned int cPoses = pMatchCandidates->MatchPoseCount();
+
+	float minDistance = 1.0f;   // initialize to the maximum normalized distance
+	hr = pMatchCandidates->CalculateMinimumDistance(&minDistance);
+
+	if (FAILED(hr) || 0 == cPoses)
+	{
+		goto FinishFrame;
+	}
+
+	// Check the closest frame is similar enough to our database to re-localize
+	// For frames that have a larger minimum distance, standard tracking will run
+	// and if this fails, tracking will be considered lost.
+	if (minDistance >= m_fCameraPoseFinderDistanceThresholdReject)
+	{
+		cout<<"FindCameraPose exited early as not good enough pose matches."<<endl;
+		hr = E_NUI_NO_MATCH;
+		goto FinishFrame;
+	}
+
+	// Get the actual matched poses
+	const Matrix4 *pNeighbors = nullptr;
+	hr = pMatchCandidates->GetMatchPoses(&pNeighbors);
+
+	if (FAILED(hr))
+	{
+		goto FinishFrame;
+	}
+
+	////////////////////////////////////////////////////////
+	// Smooth depth image
+
+	hr = m_pVolume->SmoothDepthFloatFrame(
+		m_pDepthFloatImage,
+		m_pSmoothDepthFloatImage,
+		m_cSmoothingKernelWidth,
+		m_fSmoothingDistanceThreshold); // ON GPU
+
+	if (FAILED(hr))
+	{
+		cout << "Kinect Fusion SmoothDepth call failed." << endl;
+		goto FinishFrame;
+	}
+
+	////////////////////////////////////////////////////////
+	// Calculate Point Cloud from smoothed input Depth Image
+
+	hr = NuiFusionDepthFloatFrameToPointCloud(
+		m_pSmoothDepthFloatImage,
+		m_pDepthPointCloud);
+
+	if (FAILED(hr))
+	{
+		cout<<"Kinect Fusion NuiFusionDepthFloatFrameToPointCloud call failed."<<endl;
+		goto FinishFrame;
+	}
+
+	HRESULT tracking = S_OK;
+	FLOAT alignmentEnergy = 0;
+
+	unsigned short relocIterationCount = NUI_FUSION_DEFAULT_ALIGN_ITERATION_COUNT;
+
+	double smallestEnergy = DBL_MAX;
+	int smallestEnergyNeighborIndex = -1;
+
+	int bestNeighborIndex = -1;
+	Matrix4 bestNeighborCameraPose;
+	SetIdentityMatrix(bestNeighborCameraPose);
+	// Exclude very tiny alignment energy case which is unlikely to happen in reality - this is more likely a tracking error
+	double bestNeighborAlignmentEnergy = m_fMaxAlignPointCloudsEnergyForSuccess;
+
+	// Run alignment with best matched poses (i.e. k nearest neighbors (kNN))
+	unsigned int maxTests = min(m_cMaxCameraPoseFinderPoseTests, cPoses);
+
+	for (unsigned int n = 0; n < maxTests; n++)
+	{
+		////////////////////////////////////////////////////////
+		// Call AlignPointClouds
+
+		Matrix4 poseProposal = pNeighbors[n];
+
+		// Get the saved pose view by raycasting the volume
+		hr = m_pVolume->CalculatePointCloud(m_pRaycastPointCloud, nullptr, &poseProposal);
+
+		tracking = m_pVolume->AlignPointClouds(
+			m_pRaycastPointCloud,
+			m_pDepthPointCloud,
+			relocIterationCount,
+			nullptr,
+			&alignmentEnergy,
+			&poseProposal);
+
+
+		if (SUCCEEDED(tracking) && alignmentEnergy < bestNeighborAlignmentEnergy  && alignmentEnergy > m_fMinAlignPointCloudsEnergyForSuccess)
+		{
+			bestNeighborAlignmentEnergy = alignmentEnergy;
+			bestNeighborIndex = n;
+
+			// This is after tracking succeeds, so should be a more accurate pose to store...
+			bestNeighborCameraPose = poseProposal;
+		}
+
+		// Find smallest energy neighbor independent of tracking success
+		if (alignmentEnergy < smallestEnergy)
+		{
+			smallestEnergy = alignmentEnergy;
+			smallestEnergyNeighborIndex = n;
+		}
+	}
+
+	// Use the neighbor with the smallest residual alignment energy
+	// At the cost of additional processing we could also use kNN+Mean camera pose finding here
+	// by calculating the mean pose of the best n matched poses and also testing this to see if the 
+	// residual alignment energy is less than with kNN.
+	if (bestNeighborIndex > -1)
+	{
+		m_worldToCameraTransform = bestNeighborCameraPose;
+
+		// Get the saved pose view by raycasting the volume
+		hr = m_pVolume->CalculatePointCloud(m_pRaycastPointCloud, nullptr, &m_worldToCameraTransform);
+
+		if (FAILED(hr))
+		{
+			goto FinishFrame;
+		}
+
+		// Tracking succeeded!
+		hr = S_OK;
+
+		SetTrackingSucceeded();
+
+		// Run a single iteration of AlignPointClouds to get the deltas frame
+		hr = m_pVolume->AlignPointClouds(
+			m_pRaycastPointCloud,
+			m_pDepthPointCloud,
+			1,
+			m_pShadedDeltaFromReference,
+			&alignmentEnergy,
+			&bestNeighborCameraPose);
+
+		if (SUCCEEDED(hr))
+		{
+			StoreImageToFrameBuffer(m_pShadedDeltaFromReference, m_pTrackingDataRGBX);
+		}
+
+		// Stop the residual image being displayed as we have stored our own
+		m_bCalculateDeltaFrame = false;
+
+		WCHAR str[MAX_PATH];
+		swprintf_s(str, ARRAYSIZE(str), L"Camera Pose Finder SUCCESS! Residual energy=%f, %d frames stored, minimum distance=%f, best match index=%d", bestNeighborAlignmentEnergy, cPoses, minDistance, bestNeighborIndex);
+		cout<<str<<endl;
+	}
+	else
+	{
+		m_worldToCameraTransform = pNeighbors[smallestEnergyNeighborIndex];
+
+		// Get the smallest energy view by raycasting the volume
+		hr = m_pVolume->CalculatePointCloud(m_pRaycastPointCloud, nullptr, &m_worldToCameraTransform);
+
+		if (FAILED(hr))
+		{
+			goto FinishFrame;
+		}
+
+		// Camera pose finding failed - return the tracking failed error code
+		hr = E_NUI_FUSION_TRACKING_ERROR;
+
+		// Tracking Failed will be set again on the next iteration in ProcessDepth
+		WCHAR str[MAX_PATH];
+		swprintf_s(str, ARRAYSIZE(str), L"Camera Pose Finder FAILED! Residual energy=%f, %d frames stored, minimum distance=%f, best match index=%d", smallestEnergy, cPoses, minDistance, smallestEnergyNeighborIndex);
+		cout<<(str);
+	}
+
+FinishFrame:
+
+	SafeRelease(pMatchCandidates);
+
+	return hr;
+}
+
+/// Update the camera pose finder data.
+/// </summary>
+/// <returns>S_OK on success, otherwise failure code</returns>
+HRESULT KinectFusionRenderOculus::UpdateCameraPoseFinder()
+{
+	//cout << "Update Camera Pose" << endl;
+	HRESULT hr = S_OK;
+
+	if (nullptr == m_pDepthFloatImage || nullptr == m_pColorImage
+		|| nullptr == m_pResampledColorImage || nullptr == m_pCameraPoseFinder)
+	{
+		return E_FAIL;
+	}
+
+	bool resampled = false;
+
+	hr = ProcessColorForCameraPoseFinder(resampled);
+
+	if (FAILED(hr))
+	{
+		return hr;
+	}
+
+	BOOL poseHistoryTrimmed = FALSE;
+	BOOL addedPose = FALSE;
+
+	// This function will add the pose to the camera pose finding database when the input frame's minimum
+	// distance to the existing database is equal to or above m_fDistanceThresholdAccept (i.e. indicating 
+	// that the input has become dis-similar to the existing database and a new frame should be captured).
+	// Note that the color and depth frames must be the same size, however, the horizontal mirroring
+	// setting does not have to be consistent between depth and color. It does have to be consistent
+	// between camera pose finder database creation and calling FindCameraPose though, hence we always
+	// reset both the reconstruction and database when changing the mirror depth setting.
+	hr = m_pCameraPoseFinder->ProcessFrame(
+		m_pDepthFloatImage,
+		resampled ? m_pResampledColorImage : m_pColorImage,
+		&m_worldToCameraTransform,
+		m_fCameraPoseFinderDistanceThresholdAccept,
+		&addedPose,
+		&poseHistoryTrimmed);
+
+	if (TRUE == addedPose)
+	{
+		WCHAR str[MAX_PATH];
+		swprintf_s(str, ARRAYSIZE(str), L"Camera Pose Finder Added Frame! %d frames stored, minimum distance>=%f\n", m_pCameraPoseFinder->GetStoredPoseCount(), m_fCameraPoseFinderDistanceThresholdAccept);
+		cout << str << endl;;
+	}
+
+	if (TRUE == poseHistoryTrimmed)
+	{
+		cout<<"Kinect Fusion Camera Pose Finder pose history is full, overwritten oldest pose to store current pose."<<endl;
+	}
+
+	if (FAILED(hr))
+	{
+		cout<<"Kinect Fusion Camera Pose Finder Process Frame call failed."<<endl;
+	}
+
+	return hr;
+}
+void KinectFusionRenderOculus::printMat(Matrix4 mat)
+{
+	cout << mat.M11 << mat.M12 << mat.M13  << mat.M14 << endl;
+	cout<<mat.M21 << mat.M22 << mat.M23 << mat.M24 << endl;
+	cout << mat.M31 << mat.M32 << mat.M33<< mat.M34 << endl;
+	cout << mat.M41 << mat.M42 <<mat.M43 << mat.M44 << endl;
+}
+void KinectFusionRenderOculus::ProcessDepthAdvanced()
+{
+
+	HRESULT hr = S_OK;
+	bool depthAvailable = false;
+	bool raycastFrame = false;
+	bool cameraPoseFinderAvailable = IsCameraPoseFinderAvailable();
+	bool integrateColor = m_bCaptureColor && m_cFrameCounter % m_cColorIntegrationInterval == 0;
+	bool colorSynchronized = false;
+	FLOAT alignmentEnergy = 1.0f;
+	Matrix4 calculatedCameraPose = m_worldToCameraTransform;
+	m_bCalculateDeltaFrame = (m_cFrameCounter % m_cDeltaFromReferenceFrameCalculationInterval == 0)
+		|| (m_bTrackingHasFailedPreviously && m_cSuccessfulFrameCounter <= 2);
+
+	if (!GetKinectFrames(colorSynchronized))
+	{
+		goto FinishFrame;
+	}
+	//std::cout << colorSynchronized << endl;
+	// Only integrate when color is synchronized with depth
+	integrateColor = integrateColor && colorSynchronized;
+
+	////////////////////////////////////////////////////////
+	// Depth to Depth Float
+
+	// Convert the pixels describing extended depth as unsigned short type in millimeters to depth
+	// as floating point type in meters.
+	if (nullptr == m_pVolume)
+	{
+		hr = NuiFusionDepthToDepthFloatFrame(
+			m_pDepthImagePixelBuffer,
+			m_cDepthWidth,
+			m_cDepthHeight,
+			m_pDepthFloatImage,
+			m_fMinDepthThreshold,
+			m_fMaxDepthThreshold,
+			m_bMirrorDepthFrame);
+	}
+	else
+	{
+		hr = m_pVolume->DepthToDepthFloatFrame(
+			m_pDepthImagePixelBuffer,
+			m_cDepthImagePixels * sizeof(NUI_DEPTH_IMAGE_PIXEL),
+			m_pDepthFloatImage,
+			m_fMinDepthThreshold,
+			m_fMaxDepthThreshold,
+			m_bMirrorDepthFrame);
+	}
+	if (FAILED(hr))
+	{
+		cout << "Kinect Fusion NuiFusionDepthToDepthFloatFrame call failed." << endl;
+		goto FinishFrame;
+	}
+	else
+	{
+		KinectDepthFloatImageToOpenCV(m_pDepthFloatImage);
+	}
+	depthAvailable = true;
+	if (colorSynchronized && depthAvailable)
+	{
+		KinectColorFloatImageToOpenCV(m_pColorImage, "Color Image");
+	}
+
+	// Return if the volume is not initialized, just drawing the depth image
+	if (nullptr == m_pVolume)
+	{
+		cout<<"Kinect Fusion reconstruction volume not initialized. "<<	L"Please try reducing volume size or restarting.";
+		goto FinishFrame;
+	}
+
+	////////////////////////////////////////////////////////
+	// Perform Camera Tracking
+
+	HRESULT tracking = E_NUI_FUSION_TRACKING_ERROR;
+
+	if (!m_bTrackingFailed && 0 != m_cFrameCounter)
+	{
+		// Here we can either call or TrackCameraAlignDepthFloatToReconstruction or TrackCameraAlignPointClouds
+		// The TrackCameraAlignPointClouds function typically has higher performance with the camera pose finder 
+		// due to its wider basin of convergence, enabling it to more robustly regain tracking from nearby poses
+		// suggested by the camera pose finder after tracking is lost.
+		if (false)
+		{
+			tracking = TrackCameraAlignPointClouds(calculatedCameraPose, alignmentEnergy);
+		}
+		else
+		{
+			// If the camera pose finder is not turned on, we use AlignDepthFloatToReconstruction
+			tracking = TrackCameraAlignDepthFloatToReconstruction(calculatedCameraPose, alignmentEnergy);
+		}
+	}
+
+
+	if (FAILED(tracking) && 0 != m_cFrameCounter)   // frame 0 always succeeds
+	{
+		hr = ResetReconstruction();
+
+		if (SUCCEEDED(hr))
+		{
+			// Set bad tracking message
+			cout << "Kinect Fusion camera tracking failed, " << "automatically reset volume." << endl;
+		}
+		else
+		{
+			cout << "Kinect Fusion Reset Reconstruction call failed." << endl;
+			goto FinishFrame;
+		}
+		/*
+		SetTrackingFailed();
+
+		if (!cameraPoseFinderAvailable)
+		{
+			if (tracking == E_NUI_FUSION_TRACKING_ERROR)
+			{
+				WCHAR str[MAX_PATH];
+				swprintf_s(str, ARRAYSIZE(str), L"Kinect Fusion camera tracking FAILED! Align the camera to the last tracked position.");
+				cout<<str<<endl;
+			}
+			else
+			{
+				cout<<"Kinect Fusion camera tracking call failed!"<<endl;
+				goto FinishFrame;
+			}
+		}
+		else
+		{
+			// Here we try to find the correct camera pose, to re-localize camera tracking.
+			// We can call either the version using AlignDepthFloatToReconstruction or the version 
+			// using AlignPointClouds, which typically has a higher success rate with the camera pose finder.
+			//tracking = FindCameraPoseAlignDepthFloatToReconstruction();
+			tracking = FindCameraPoseAlignPointClouds();
+			cout << "Using cam Pose finder" << endl;
+			if (FAILED(tracking) && tracking != E_NUI_FUSION_TRACKING_ERROR)
+			{
+				cout<<"Kinect Fusion FindCameraPose call failed."<<endl;
+				goto FinishFrame;
+			}
+		}*/
+	}
+	/*if (FAILED(tracking) && 0 != m_cFrameCounter)
+	{
+		SetTrackingFailed();
+	}*/
+	else
+	{
+		if (m_bTrackingHasFailedPreviously)
+		{
+			WCHAR str[MAX_PATH];
+			if (!m_bAutoFindCameraPoseWhenLost)
+			{
+				swprintf_s(str, ARRAYSIZE(str), L"Kinect Fusion camera tracking RECOVERED! Residual energy=%f", alignmentEnergy);
+			}
+			else
+			{
+				swprintf_s(str, ARRAYSIZE(str), L"Kinect Fusion camera tracking RECOVERED!");
+			}
+			cout<<str<<endl;
+		}
+
+		m_worldToCameraTransform = calculatedCameraPose;
+		//printMat(m_worldToCameraTransform);
+		SetTrackingSucceeded();
+	}
+
+	//If tracking has been lost for some number of frames reset the reconstruction volume
+/*	if (m_bAutoResetReconstructionWhenLost &&
+		m_bTrackingFailed &&
+		m_cLostFrameCounter >= cResetOnNumberOfLostFrames)
+	{
+		// Automatically Clear Volume and reset tracking if tracking fails
+		hr = ResetReconstruction();
+
+		if (SUCCEEDED(hr))
+		{
+			// Set bad tracking message
+			cout<<"Kinect Fusion camera tracking failed, "<<"automatically reset volume."<<endl;
+		}
+		else
+		{
+			cout<<"Kinect Fusion Reset Reconstruction call failed."<<endl;
+			goto FinishFrame;
+		}
+	}*/
+
+	////////////////////////////////////////////////////////
+	// Integrate Depth Data into volume
+
+	// Don't integrate depth data into the volume if:
+	// 1) tracking failed
+	// 2) camera pose finder is off and we have paused capture
+	// 3) camera pose finder is on and we are still under the m_cMinSuccessfulTrackingFramesForCameraPoseFinderAfterFailure
+	//    number of successful frames count.
+	bool integrateData = !m_bTrackingFailed || (cameraPoseFinderAvailable && !(m_bTrackingHasFailedPreviously && m_cSuccessfulFrameCounter < m_cMinSuccessfulTrackingFramesForCameraPoseFinderAfterFailure));
+	if (integrateData)
+	{
+		if (cameraPoseFinderAvailable)
+		{
+			// If integration resumed, this will un-check the pause integration check box back on in the UI automatically
+			m_bIntegrationResumed = true;
+		}
+
+		// Reset this flag as we are now integrating data again
+		m_bTrackingHasFailedPreviously = false;
+
+		if (integrateColor)
+		{
+			// Map the color frame to the depth - this fills m_pResampledColorImageDepthAligned
+			MapColorToDepth();
+
+			// Integrate the depth and color data into the volume from the calculated camera pose
+			hr = m_pVolume->IntegrateFrame(
+				m_pDepthFloatImage,
+				m_pResampledColorImageDepthAligned,
+				m_cMaxIntegrationWeight,
+				NUI_FUSION_DEFAULT_COLOR_INTEGRATION_OF_ALL_ANGLES,
+				&m_worldToCameraTransform);
+
+			   m_bColorCaptured = true;
+		}
+		else
+		{
+			// Integrate just the depth data into the volume from the calculated camera pose
+			hr = m_pVolume->IntegrateFrame(
+				m_pDepthFloatImage,
+				nullptr,
+				m_cMaxIntegrationWeight,
+				NUI_FUSION_DEFAULT_COLOR_INTEGRATION_OF_ALL_ANGLES,
+				&m_worldToCameraTransform);
+		}
+
+		if (FAILED(hr))
+		{
+			cout<<"Kinect Fusion IntegrateFrame call failed."<<endl;
+			goto FinishFrame;
+		}
+	}
+
+
+	////////////////////////////////////////////////////////
+	// Update camera pose finder, adding key frames to the database
+
+	if (m_bAutoFindCameraPoseWhenLost && !m_bTrackingHasFailedPreviously
+		&& m_cSuccessfulFrameCounter > m_cMinSuccessfulTrackingFramesForCameraPoseFinder
+		&& m_cFrameCounter % m_cCameraPoseFinderProcessFrameCalculationInterval == 0
+		&& colorSynchronized)
+	{
+		hr = UpdateCameraPoseFinder();
+
+		if (FAILED(hr))
+		{
+			cout << "Kinect Fusion UpdateCameraPoseFinder call failed." << endl;
+			goto FinishFrame;
+		}
+	}
+
+FinishFrame:
+
+
+	if (cameraPoseFinderAvailable)
+	{
+		// Do not set false, as camera pose finder will toggle automatically depending on whether it has
+		// regained tracking (re-localized) and is integrating again.
+		//m_bIntegrationResumed = m_bIntegrationResumed;
+	}
+	else
+	{
+		//m_bIntegrationResumed = m_bIntegrationResumed;
+		m_bIntegrationResumed = false;
+	}
+
+	////////////////////////////////////////////////////////
+	// Copy the images to their frame buffers
+	
+	if (depthAvailable)
+	{
+		StoreImageToFrameBuffer(m_pDepthFloatImage, m_pDepthRGBX);
+	}
+	
+	if (raycastFrame)
+	{
+	/*	if (m_bCaptureColor)
+		{
+			StoreImageToFrameBuffer(m_pCapturedSurfaceColor, m_pReconstructionRGBX);
+		}
+		else if (m_bDisplaySurfaceNormals)
+		{
+			StoreImageToFrameBuffer(m_pShadedSurfaceNormals, m_pReconstructionRGBX);
+		}
+		else
+		{
+			StoreImageToFrameBuffer(m_pShadedSurface, m_pReconstructionRGBX);
+		}*/
+	}
+	
+	// Display raycast depth image when in pose finding mode
+	if (m_bTrackingFailed && cameraPoseFinderAvailable)
+	{
+		StoreImageToFrameBuffer(m_pRaycastDepthFloatImage, m_pTrackingDataRGBX);
+	}
+	else
+	{
+		// Don't calculate the residual delta from reference frame every frame to reduce computation time
+		if (m_bCalculateDeltaFrame)
+		{
+			if (!m_bAutoFindCameraPoseWhenLost)
+			{
+				// Color the float residuals from the AlignDepthFloatToReconstruction
+				hr = ColorResiduals(m_pFloatDeltaFromReference, m_pShadedDeltaFromReference);
+			}
+
+			if (SUCCEEDED(hr))
+			{
+				StoreImageToFrameBuffer(m_pShadedDeltaFromReference, m_pTrackingDataRGBX);
+			}
+		}
+	}
+	m_cFrameCounter++;
+	double elapsed = m_timer.AbsoluteTime() - m_fStartTime;
+	if ((int)elapsed >= cTimeDisplayInterval)
+	{
+		double fps = (double)m_cFrameCounter / elapsed;
+
+		// Update status display
+		if (!m_bTrackingFailed)
+		{
+			WCHAR str[MAX_PATH];
+			swprintf_s(str, ARRAYSIZE(str), L"Fps: %5.2f", fps);
+			//SetStatusMessage(str);
+		}
+
+		m_cFrameCounter = 0;
+		m_fStartTime = m_timer.AbsoluteTime();
+	}
+
+
+
+}
 
 void KinectFusionRenderOculus::KinectColorFloatImageToOpenCV(NUI_FUSION_IMAGE_FRAME* colorImgFrame,string winName)
 {
@@ -1154,7 +2664,6 @@ void KinectFusionRenderOculus::KinectColorFloatImageToOpenCV(NUI_FUSION_IMAGE_FR
 	}
 	pColorImageTexture->UnlockRect(0);
 	imshow(winName, m_floatColorOpenCV);
-
 }
 
 
@@ -1283,12 +2792,6 @@ HRESULT KinectFusionRenderOculus::MapColorToDepth()
 	return hr;
 }
 
-
-HRESULT KinectFusionRenderOculus::ResetReconstruction()
-{
-	return E_NOTIMPL;
-}
-
 void KinectFusionRenderOculus::SetIdentityMatrix(Matrix4 &mat)
 {
 	mat.M11 = 1; mat.M12 = 0; mat.M13 = 0; mat.M14 = 0;
@@ -1299,12 +2802,18 @@ void KinectFusionRenderOculus::SetIdentityMatrix(Matrix4 &mat)
 
 bool KinectFusionRenderOculus::RenderForOculus()
 {
-	if (!GenerateTextureToRender(m_pShadedSurfaceLeft,m_pPointCloudOculusLeft, m_worldToCameraTransform, *leftEyeTexture))
+	Matrix4 leftEye = m_worldToCameraTransform;
+	leftEye.M41 -= m_leftEyeTrans.x;
+	leftEye.M42 += 0.13;
+	if (!GenerateTextureToRender(m_pShadedSurfaceLeft,m_pPointCloudOculusLeft, leftEye, *leftEyeTexture))
 	{
 		cout << "couldn't generate Eye texture" << endl;
 		return false;
 	}
-	if (!GenerateTextureToRender(m_pShadedSurfaceRight, m_pPointCloudOculusRight, m_worldToCameraTransform, *rightEyeTexture))
+	Matrix4 rightEye = m_worldToCameraTransform;
+	rightEye.M41 -= m_rightEyeTrans.x;
+	rightEye.M42 += 0.13;
+	if (!GenerateTextureToRender(m_pShadedSurfaceRight, m_pPointCloudOculusRight, rightEye, *rightEyeTexture))
 	{
 		cout << "couldn't generate Eye texture" << endl;
 		return false;
@@ -1317,8 +2826,10 @@ bool KinectFusionRenderOculus::CreateRenderObjectsForOculus()
 {
 
 	// Frames generated from the depth input
-	m_camParamsLeft = ComputeCamParams(m_leftEyeFOV, m_leftTextureSize);
-	m_camParamsRight = ComputeCamParams(m_rightEyeFOV, m_rightTextureSize);
+
+	m_camParamsLeft = ComputeCamParams(m_leftEyeFOV, m_leftTextureSize,1.15);
+	m_camParamsRight = ComputeCamParams(m_rightEyeFOV, m_rightTextureSize,1.15);
+
 	//std::cout << "Left FOV: " << m_leftEyeFOV.LeftTan << "  " << m_leftEyeFOV.UpTan << endl;
 	//std::cout << "Right FOV: " << m_rightEyeFOV.LeftTan << "  " << m_rightEyeFOV.UpTan << endl;
 	//std::cout << "Left Size: " << m_leftTextureSize.w << "  " << m_leftTextureSize.w << endl;
@@ -1377,11 +2888,11 @@ float KinectFusionRenderOculus::ComputeFocalLengthFromAngleTan(float tanAngle,fl
 	return width/(2 * tanAngle);
 }
 
-NUI_FUSION_CAMERA_PARAMETERS KinectFusionRenderOculus::ComputeCamParams(ovrFovPort fov, OVR::Sizei texSize)
+NUI_FUSION_CAMERA_PARAMETERS KinectFusionRenderOculus::ComputeCamParams(ovrFovPort fov, OVR::Sizei texSize, float correction)
 {
 	NUI_FUSION_CAMERA_PARAMETERS params;
-	params.focalLengthX = ComputeFocalLengthFromAngleTan(fov.LeftTan, texSize.w)/texSize.w;
-	params.focalLengthY = ComputeFocalLengthFromAngleTan(fov.UpTan, texSize.h)/texSize.h;
+	params.focalLengthX = correction*ComputeFocalLengthFromAngleTan(fov.LeftTan, texSize.w)/texSize.w;
+	params.focalLengthY = correction*ComputeFocalLengthFromAngleTan(fov.UpTan, texSize.h)/texSize.h;
 	params.principalPointX = 0.5;
 	params.principalPointY = 0.5;
 	return params;
