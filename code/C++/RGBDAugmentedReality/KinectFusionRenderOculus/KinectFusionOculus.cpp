@@ -2835,6 +2835,10 @@ bool KinectFusionRenderOculus::RenderForOculus()
 	m_osystem->Render(*leftEyeTexture,*rightEyeTexture);
 	return true;
 }
+void Matrix4toOVRMatrix4f(Matrix4& kinMat, Matrix4& ocMat)
+{
+
+}
 bool KinectFusionRenderOculus::RenderForOculusAdvanced()
 {
 	clock_t currTime = clock();

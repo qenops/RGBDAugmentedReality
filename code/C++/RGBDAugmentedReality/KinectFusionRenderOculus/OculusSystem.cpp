@@ -232,6 +232,18 @@ void OculusSystem::Render()
 
 
 }
+
+void printMat(OVR::Matrix4f mat)
+{
+	for (int i = 0; i < 4; i++)
+	{
+		for (int j = 0; j < 4; j++)
+		{
+			cout<<mat.M[i][j];
+		}
+		cout << endl;
+	}
+}
 void OculusSystem::InitScene()
 {
 	m_scene = new Scene();
@@ -262,7 +274,8 @@ void OculusSystem::InitScene()
 		}
 		printf("\n");
 	}
-	OVR::Matrix4f meshPoseWTO = meshePoseMatWC * cameraPoseMat;
+	//OVR::Matrix4f meshPoseWTO = meshePoseMatWC * cameraPoseMat;
+	OVR::Matrix4f meshPoseWTO = meshePoseMatWC;
 	m_meshTrasformMat = meshPoseWTO;
 	m_meshTrasformMat.Invert();
 	cout << "Scene Initialized" << endl;
@@ -283,7 +296,7 @@ void OculusSystem::Render(Texture & leftTex, Texture & rightTex,OVR::Matrix4f le
 	if (m_isVisible)
 	{
 
-		m_scene->playBack( deltaTime);
+		m_scene->playBack(deltaTime);
 		for (int eye = 0; eye < 2; ++eye)
 		{
 			// Increment to use next texture, just before writing
@@ -337,10 +350,20 @@ void OculusSystem::Render(Texture & leftTex, Texture & rightTex,OVR::Matrix4f le
 			OVR::Vector3f shiftedEyePos = Pos2 + rollPitchYaw.Transform(EyeRenderPose[eye].Position);
 
 			OVR::Matrix4f view = OVR::Matrix4f::LookAtRH(shiftedEyePos, shiftedEyePos + finalForward, finalUp);
+			
 			OVR::Matrix4f proj = ovrMatrix4f_Projection(hmdDesc.DefaultEyeFov[eye], 0.2f, 1000.0f, ovrProjection_RightHanded);
 
-			moveMesh(m_meshTrasformMat);
-			m_scene->render(proj, view, m_meshTrasformMat);
+			printMat(view);
+			//moveMesh(m_meshTrasformMat);
+			if (eye == 0)
+			{
+				m_scene->render(proj, leftPose, m_meshTrasformMat);
+			}
+			else
+			{
+				m_scene->render(proj, rightPose, m_meshTrasformMat);
+			}
+			
 
 			//scene->loadDynamicMeshes(923, 958,1,PLY,"surface_fg_");
 			// Avoids an error when calling SetAndClearRenderSurface during next iteration.

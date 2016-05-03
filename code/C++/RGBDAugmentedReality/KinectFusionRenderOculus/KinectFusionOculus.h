@@ -72,7 +72,7 @@ private:
 	void ProcessDepthAdvanced();
 
 	void KinectColorFloatImageToOpenCV(NUI_FUSION_IMAGE_FRAME* colorImgFrame, string winName);
-
+	void Matrix4toOVRMatrix4f(Matrix4& kinMat, Matrix4& ocMat);
 	void KinectDepthFloatImageToOpenCV(NUI_FUSION_IMAGE_FRAME * depthImgFrame);
 
 	bool GenerateTextureToRender(NUI_FUSION_IMAGE_FRAME* pShadedSurface, NUI_FUSION_IMAGE_FRAME* pCloud, Matrix4 poseWorldtoCamera, Texture& tex);
