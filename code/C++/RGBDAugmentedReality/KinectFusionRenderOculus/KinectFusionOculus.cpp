@@ -2835,16 +2835,33 @@ bool KinectFusionRenderOculus::RenderForOculus()
 	m_osystem->Render(*leftEyeTexture,*rightEyeTexture);
 	return true;
 }
-void Matrix4toOVRMatrix4f(Matrix4& kinMat, Matrix4& ocMat)
+void Matrix4toOVRMatrix4f(Matrix4& mat, OVR::Matrix4f& ocMat)
 {
-
+	ocMat.M[0][0] = mat.M11;
+	ocMat.M[0][1] = mat.M12;
+	ocMat.M[0][2] = mat.M13;
+	ocMat.M[0][3] = mat.M14;
+	ocMat.M[1][0] = mat.M21;
+	ocMat.M[1][1] = mat.M22;
+	ocMat.M[1][2] = mat.M23;
+	ocMat.M[1][3] = mat.M24;
+	ocMat.M[2][0] = mat.M31;
+	ocMat.M[2][1] = mat.M32;
+	ocMat.M[2][2] = mat.M33;
+	ocMat.M[2][3] = mat.M34;
+	ocMat.M[3][0] = mat.M41;
+	ocMat.M[3][1] = mat.M42;
+	ocMat.M[3][2] = mat.M43;
+	ocMat.M[3][3] = mat.M44;
 }
 bool KinectFusionRenderOculus::RenderForOculusAdvanced()
 {
 	clock_t currTime = clock();
 	m_deltaTime = float(clock() - m_lastTime) / CLOCKS_PER_SEC;
 	m_lastTime = currTime;
-
+	OVR::Matrix4f currWTOC;
+	Matrix4toOVRMatrix4f(m_worldToCameraTransform, currWTOC);
+	currWTOC.Transpose();
 	Matrix4 leftEye = m_worldToCameraTransform;
 	leftEye.M41 -= m_leftEyeTrans.x;
 	leftEye.M42 += 0.13;
@@ -2862,7 +2879,7 @@ bool KinectFusionRenderOculus::RenderForOculusAdvanced()
 		return false;
 	}
 	//m_osystem->Render(*leftEyeTexture, *rightEyeTexture);
-	m_osystem->Render(*leftEyeTexture, *rightEyeTexture,OVR::Matrix4f::Translation(m_leftEyeTrans.x, m_leftEyeTrans.y, m_leftEyeTrans.z), OVR::Matrix4f::Translation(m_rightEyeTrans.x, m_rightEyeTrans.y, m_rightEyeTrans.z),m_deltaTime);
+	m_osystem->Render(*leftEyeTexture, *rightEyeTexture, currWTOC, currWTOC,m_deltaTime);
 	return true;
 }
 bool KinectFusionRenderOculus::CreateRenderObjectsForOculus()

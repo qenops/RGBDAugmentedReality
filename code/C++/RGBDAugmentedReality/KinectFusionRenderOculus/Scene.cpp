@@ -246,7 +246,7 @@ void Scene::render(const OVR::Matrix4f& projectionMat, const OVR::Matrix4f& view
 	OVR::Matrix4f rotateMat = OVR::Matrix4f::RotationY(0.0f);
 	OVR::Matrix4f transMat = OVR::Matrix4f::Translation(0.0f, 14.0f, 0.0f);
 
-	OVR::Matrix4f modelMat =  transformMat;
+	OVR::Matrix4f modelMat = scaleMat*  transformMat;
 
 	OVR::Matrix4f mvp = projectionMat * viewMat * modelMat;
 

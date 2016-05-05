@@ -274,8 +274,8 @@ void OculusSystem::InitScene()
 		}
 		printf("\n");
 	}
-	//OVR::Matrix4f meshPoseWTO = meshePoseMatWC * cameraPoseMat;
-	OVR::Matrix4f meshPoseWTO = meshePoseMatWC;
+	OVR::Matrix4f meshPoseWTO = meshePoseMatWC * cameraPoseMat;
+	//OVR::Matrix4f meshPoseWTO = meshePoseMatWC;
 	m_meshTrasformMat = meshPoseWTO;
 	m_meshTrasformMat.Invert();
 	cout << "Scene Initialized" << endl;
@@ -339,29 +339,31 @@ void OculusSystem::Render(Texture & leftTex, Texture & rightTex,OVR::Matrix4f le
 
 			//Render 
 			// Get view and projection matrices
-			OVR::Matrix4f rollPitchYaw = OVR::Matrix4f::RotationY(0.0f);
+			OVR::Matrix4f rollPitchYaw = OVR::Matrix4f::RotationY(3.14);
 			OVR::Matrix4f finalRollPitchYaw = rollPitchYaw * OVR::Matrix4f(EyeRenderPose[eye].Orientation);
 			OVR::Vector3f finalUp = finalRollPitchYaw.Transform(OVR::Vector3f(0, 1, 0));
 			OVR::Vector3f finalForward = finalRollPitchYaw.Transform(OVR::Vector3f(0, 0, -1));
-
+			/*OVR::Matrix4f finalRollPitchYaw = rollPitchYaw * OVR::Matrix4f(EyeRenderPose[eye].Orientation);
+			OVR::Vector3f finalUp = finalRollPitchYaw.Transform(OVR::Vector3f(0, 1, 0));
+			OVR::Vector3f finalForward = finalRollPitchYaw.Transform(OVR::Vector3f(0, 1, 0));*/
 			// Moving camera using Keyboard
 			//moveCamera(finalUp, finalForward, Pos2);
 			OVR::Vector3f Pos2(0.0f, 0.0f, 0.0f);
 			OVR::Vector3f shiftedEyePos = Pos2 + rollPitchYaw.Transform(EyeRenderPose[eye].Position);
-
+			//OVR::Vector3f shiftedEyePos = Pos2 + EyeRenderPose[eye].Position;
 			OVR::Matrix4f view = OVR::Matrix4f::LookAtRH(shiftedEyePos, shiftedEyePos + finalForward, finalUp);
 			
 			OVR::Matrix4f proj = ovrMatrix4f_Projection(hmdDesc.DefaultEyeFov[eye], 0.2f, 1000.0f, ovrProjection_RightHanded);
-
-			printMat(view);
-			//moveMesh(m_meshTrasformMat);
+			//OVR::Matrix4f scaleMat = ;  
+				//m_meshTrasformMat = view *scaleMat* m_meshTrasformMat;
+		
 			if (eye == 0)
 			{
-				m_scene->render(proj, leftPose, m_meshTrasformMat);
+				m_scene->render(proj,view, m_meshTrasformMat);
 			}
 			else
 			{
-				m_scene->render(proj, rightPose, m_meshTrasformMat);
+				m_scene->render(proj, view, m_meshTrasformMat);
 			}
 			
 
