@@ -130,6 +130,7 @@ ENV/
 *.exp
 *.opendb
 *.db
+/assets
 /Models
 /include
 /code/C++/RGBDAugmentedReality/~$tes on Kinect Fusion.docx
