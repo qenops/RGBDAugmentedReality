@@ -1,0 +1,40 @@
+\begin{thebibliography}{\protect\citename{Newcombe et~al\mbox{.} }2011}
+
+\bibitem[\protect\citename{dra }]{dragon}
+Maya dragon rig.
+\newblock \url{https://gumroad.com/l/kkAJ}.
+\newblock Accessed: 2016-09-30.
+
+\bibitem[\protect\citename{Izadi et~al\mbox{.} }2011]{izadi2011kinectfusion}
+{\sc Izadi, S., Kim, D., Hilliges, O., Molyneaux, D., Newcombe, R., Kohli, P.,
+  Shotton, J., Hodges, S., Freeman, D., Davison, A., et~al.}
+\newblock 2011.
+\newblock Kinectfusion: real-time 3d reconstruction and interaction using a
+  moving depth camera.
+\newblock In {\em Proceedings of the 24th annual ACM symposium on User
+  interface software and technology}, ACM, 559--568.
+
+\bibitem[\protect\citename{Kavan et~al\mbox{.} }2008]{kavan2008geometric}
+{\sc Kavan, L., Collins, S., {\v{Z}}{\'a}ra, J., and O'Sullivan, C.}
+\newblock 2008.
+\newblock Geometric skinning with approximate dual quaternion blending.
+\newblock {\em ACM Transactions on Graphics (TOG) 27}, 4, 105.
+
+\bibitem[\protect\citename{Newcombe et~al\mbox{.}
+  }2011]{newcombe2011kinectfusion}
+{\sc Newcombe, R.~A., Izadi, S., Hilliges, O., Molyneaux, D., Kim, D., Davison,
+  A.~J., Kohi, P., Shotton, J., Hodges, S., and Fitzgibbon, A.}
+\newblock 2011.
+\newblock Kinectfusion: Real-time dense surface mapping and tracking.
+\newblock In {\em Mixed and augmented reality (ISMAR), 2011 10th IEEE
+  international symposium on}, IEEE, 127--136.
+
+\bibitem[\protect\citename{Wilson and Benko }2010]{wilson2010combining}
+{\sc Wilson, A.~D., and Benko, H.}
+\newblock 2010.
+\newblock Combining multiple depth cameras and projectors for interactions on,
+  above and between surfaces.
+\newblock In {\em Proceedings of the 23nd annual ACM symposium on User
+  interface software and technology}, ACM, 273--282.
+
+\end{thebibliography}
