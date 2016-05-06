@@ -1,1 +1,2 @@
 \subsection{Tracking}
+KinectFusion uses the current depth image and tries to align it with the reconstruction to find out the camera pose. This camera pose is used to track the head-mount with respect to the world. The same transform needs to be applied to the virtual content to keep it fixed with respect to the real world. For our initial experiments however, the rotational tracking from the Oculus was used to align the virtual objects. This can be shifted without too much effort to use the tracking from KinectFusion ensuring that the objects stay aligned to the real world.
