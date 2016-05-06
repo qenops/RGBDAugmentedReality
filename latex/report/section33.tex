@@ -1,2 +1,2 @@
 \subsection{Composit Real and Virtual Content}
-We use the textures from KinectFusion as background and composit it with our virtual content.
+Compositing is the process of combining multiple data sets to generate a single output image. Due to the constraints of KinectFusion in not providing either geometry or a point cloud, we were unable to use the traditional technique of depth buffering \cite{catmull1974subdivision} to composite our content before rendering. Given a transform, KinectFusion provided an image output which we mapped to a texture to use as background. We then rendered our character geometry on top effectively compositing the real world with our virtual content.
